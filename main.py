@@ -399,6 +399,47 @@ class Decoder(nn.Module):
         return target_token_embeddings
 
 
+class Transformer(nn.Module):
+    def __init__(
+        self,
+        source_vocab_size: int,
+        target_vocab_size: int,
+        d_model: int,
+        d_ff: int,
+        n_heads: int,
+        n_layers: int,
+        max_seq_len: int,
+    ):
+        super().__init__()
+
+        self.encoder = Encoder(
+            source_vocab_size,
+            d_model,
+            d_ff,
+            n_heads,
+            n_layers,
+            max_seq_len,
+        )
+        self.decoder = Decoder(
+            target_vocab_size,
+            d_model,
+            d_ff,
+            n_heads,
+            n_layers,
+            max_seq_len,
+        )
+        self.output_projection = nn.Linear(d_model, target_vocab_size)
+
+    def forward(
+        self,
+        source_token_ids: torch.Tensor,
+        target_token_ids: torch.Tensor,
+    ):
+        encoder_output = self.encoder(source_token_ids)
+        decoder_output = self.decoder(target_token_ids, encoder_output)
+        return self.output_projection(decoder_output)
+
+
 # Helpers
 
 def tokenizer(str):
@@ -413,10 +454,7 @@ def tokenizer(str):
     return torch.randint(0, 100, (n_words,))
 
 def init_weights(shape):
-    # TODO: implement different shape initialization approaches
-    # actually, this won't work because things like LayerNorm will not be initialized 
-    # this way, so it makes sense to go through all the named parameters
-    return torch.empty(shape)
+    return torch.empty(shape).normal_(mean=0.0, std=0.02)
 
 if __name__ == "__main__":
     main()
