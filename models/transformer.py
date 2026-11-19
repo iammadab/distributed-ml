@@ -2,6 +2,7 @@ import math
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from layers import (
     CrossAttention,
@@ -43,10 +44,11 @@ class Encoder(nn.Module):
         n_layers: int,
         max_seq_len: int,
         dropout: float,
+        embedding: Embedding | None = None,
     ):
         super().__init__()
         self.d_model = d_model
-        self.embedding = Embedding(vocab_size, d_model)
+        self.embedding = embedding if embedding is not None else Embedding(vocab_size, d_model)
         self.position_encoding = PositionalEncoding(d_model, max_seq_len)
         self.embedding_dropout = nn.Dropout(dropout)
         self.layers = nn.ModuleList(
@@ -109,10 +111,11 @@ class Decoder(nn.Module):
         n_layers: int,
         max_seq_len: int,
         dropout: float,
+        embedding: Embedding | None = None,
     ):
         super().__init__()
         self.d_model = d_model
-        self.embedding = Embedding(target_vocab_size, d_model)
+        self.embedding = embedding if embedding is not None else Embedding(target_vocab_size, d_model)
         self.position_encoding = PositionalEncoding(d_model, max_seq_len)
         self.embedding_dropout = nn.Dropout(dropout)
         self.layers = nn.ModuleList(
@@ -149,6 +152,9 @@ class Transformer(nn.Module):
         n_layers: int,
         max_seq_len: int,
         dropout: float = 0.1,
+        encoder_embedding: Embedding | None = None,
+        decoder_embedding: Embedding | None = None,
+        tie_output_weights: bool = False,
     ):
         super().__init__()
         self.encoder = Encoder(
@@ -159,6 +165,7 @@ class Transformer(nn.Module):
             n_layers,
             max_seq_len,
             dropout,
+            encoder_embedding,
         )
         self.decoder = Decoder(
             target_vocab_size,
@@ -168,8 +175,18 @@ class Transformer(nn.Module):
             n_layers,
             max_seq_len,
             dropout,
+            decoder_embedding,
         )
-        self.output_projection = nn.Linear(d_model, target_vocab_size)
+        self.tie_output_weights = tie_output_weights
+        if tie_output_weights:
+            if self.decoder.embedding.weight.shape != (target_vocab_size, d_model):
+                raise ValueError(
+                    "decoder_embedding must have shape "
+                    f"({target_vocab_size}, {d_model}) when tying output weights"
+                )
+            self.output_projection = None
+        else:
+            self.output_projection = nn.Linear(d_model, target_vocab_size)
 
     def forward(
         self,
@@ -178,4 +195,9 @@ class Transformer(nn.Module):
     ) -> torch.Tensor:
         encoder_output = self.encoder(source_token_ids)
         decoder_output = self.decoder(target_token_ids, encoder_output)
+
+        if self.tie_output_weights:
+            return F.linear(decoder_output, self.decoder.embedding.weight)
+
         return self.output_projection(decoder_output)
+

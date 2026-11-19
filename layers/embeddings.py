@@ -12,6 +12,10 @@ class Embedding(nn.Module):
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         return self.embedding(token_ids)
 
+    @property
+    def weight(self) -> torch.Tensor:
+        return self.embedding.weight
+
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model: int, initial_seq_len: int):
