@@ -7,7 +7,7 @@ from .feed_forward import (
     GELUFeedForward,
     ReLUFeedForward,
 )
-from .positional import SinusoidalPositionalEncoding
+from .positional import LearnedPositionalEmbedding, SinusoidalPositionalEncoding
 from .sublayer import SublayerConnection
 
 __all__ = [
@@ -17,6 +17,7 @@ __all__ = [
     "FeedForward",
     "GELUFeedForward",
     "GELUFFN",
+    "LearnedPositionalEmbedding",
     "ReLUFeedForward",
     "MaskedSelfAttention",
     "SelfAttention",
