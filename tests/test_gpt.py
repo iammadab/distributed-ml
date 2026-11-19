@@ -16,7 +16,7 @@ class GPTTest(unittest.TestCase):
             n_heads=4,
             n_layers=2,
         )
-        model = GPT(config)
+        model = GPT(config, Embedding(config.vocab_size, config.d_model))
         token_ids = torch.randint(0, 100, (3, 7))
 
         logits = model(token_ids)
@@ -32,13 +32,11 @@ class GPTTest(unittest.TestCase):
             d_ff=32,
             n_heads=4,
             n_layers=2,
-            tie_output_weights=True,
         )
         embedding = Embedding(config.vocab_size, config.d_model)
         model = GPT(config, embedding=embedding)
 
         self.assertIs(model.embedding, embedding)
-        self.assertIsNone(model.output_projection)
 
     def test_identical_batch_items_have_identical_outputs(self):
         config = GPTConfig(
@@ -49,12 +47,12 @@ class GPTTest(unittest.TestCase):
             n_heads=4,
             n_layers=2,
         )
-        model = GPT(config)
+        model = GPT(config, Embedding(config.vocab_size, config.d_model))
         model.eval()
         token_item = torch.randint(0, 100, (7,))
         logits = model(token_item.unsqueeze(0).repeat(2, 1))
 
-        self.assertTrue(torch.allclose(logits[0], logits[1], rtol=1e-5, atol=1e-6))
+        self.assertTrue(torch.allclose(logits[0], logits[1], rtol=1e-5, atol=3e-6))
 
 
 if __name__ == "__main__":

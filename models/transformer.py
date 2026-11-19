@@ -36,13 +36,10 @@ class EncoderLayer(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, config: TransformerConfig, embedding: Embedding | None = None):
+    def __init__(self, config: TransformerConfig, embedding: Embedding):
         super().__init__()
         self.d_model = config.d_model
-        self.embedding = embedding if embedding is not None else Embedding(
-            config.source_vocab_size,
-            config.d_model,
-        )
+        self.embedding = embedding
         self.position_encoding = SinusoidalPositionalEncoding(
             config.d_model,
             config.max_seq_len,
@@ -100,13 +97,10 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, config: TransformerConfig, embedding: Embedding | None = None):
+    def __init__(self, config: TransformerConfig, embedding: Embedding):
         super().__init__()
         self.d_model = config.d_model
-        self.embedding = embedding if embedding is not None else Embedding(
-            config.target_vocab_size,
-            config.d_model,
-        )
+        self.embedding = embedding
         self.position_encoding = SinusoidalPositionalEncoding(
             config.d_model,
             config.max_seq_len,
@@ -141,31 +135,24 @@ class Transformer(nn.Module):
     def __init__(
         self,
         config: TransformerConfig,
-        encoder_embedding: Embedding | None = None,
-        decoder_embedding: Embedding | None = None,
-        tie_output_weights: bool = False,
+        embedding: Embedding,
     ):
         super().__init__()
-        self.config = config
-        self.encoder = Encoder(config, encoder_embedding)
-        self.decoder = Decoder(config, decoder_embedding)
-        self.tie_output_weights = tie_output_weights
-        if tie_output_weights:
-            if self.decoder.embedding.weight.shape != (
-                config.target_vocab_size,
-                config.d_model,
-            ):
-                raise ValueError(
-                    "decoder_embedding must have shape "
-                    f"({config.target_vocab_size}, {config.d_model}) "
-                    "when tying output weights"
-                )
-            self.output_projection = None
-        else:
-            self.output_projection = nn.Linear(
-                config.d_model,
-                config.target_vocab_size,
+        if config.source_vocab_size != config.target_vocab_size:
+            raise ValueError(
+                "source_vocab_size and target_vocab_size must match when sharing "
+                "the embedding"
             )
+        if embedding.weight.shape != (config.source_vocab_size, config.d_model):
+            raise ValueError(
+                "embedding must have shape "
+                f"({config.source_vocab_size}, {config.d_model})"
+            )
+
+        self.config = config
+        self.embedding = embedding
+        self.encoder = Encoder(config, embedding)
+        self.decoder = Decoder(config, embedding)
 
     def forward(
         self,
@@ -174,8 +161,4 @@ class Transformer(nn.Module):
     ) -> torch.Tensor:
         encoder_output = self.encoder(source_token_ids)
         decoder_output = self.decoder(target_token_ids, encoder_output)
-
-        if self.tie_output_weights:
-            return F.linear(decoder_output, self.decoder.embedding.weight)
-
-        return self.output_projection(decoder_output)
+        return F.linear(decoder_output, self.embedding.weight)

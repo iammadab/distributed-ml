@@ -10,4 +10,3 @@ class GPTConfig:
     n_heads: int
     n_layers: int
     dropout: float = 0.1
-    tie_output_weights: bool = True

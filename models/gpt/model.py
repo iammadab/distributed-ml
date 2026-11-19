@@ -14,14 +14,11 @@ class GPT(nn.Module):
     def __init__(
         self,
         config: GPTConfig,
-        embedding: Embedding | None = None,
+        embedding: Embedding,
     ):
         super().__init__()
         self.config = config
-        self.embedding = embedding if embedding is not None else Embedding(
-            config.vocab_size,
-            config.d_model,
-        )
+        self.embedding = embedding
         if self.embedding.weight.shape != (config.vocab_size, config.d_model):
             raise ValueError(
                 "embedding must have shape "
@@ -37,13 +34,6 @@ class GPT(nn.Module):
             [GPTBlock(config) for _ in range(config.n_layers)]
         )
 
-        if config.tie_output_weights:
-            self.output_projection = None
-        else:
-            self.output_projection = nn.Linear(
-                config.d_model,
-                config.vocab_size,
-            )
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         assert token_ids.ndim == 2
@@ -55,6 +45,4 @@ class GPT(nn.Module):
         for block in self.blocks:
             token_embeddings = block(token_embeddings)
 
-        if self.config.tie_output_weights:
-            return F.linear(token_embeddings, self.embedding.weight)
-        return self.output_projection(token_embeddings)
+        return F.linear(token_embeddings, self.embedding.weight)
