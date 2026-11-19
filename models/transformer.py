@@ -56,6 +56,7 @@ class Encoder(nn.Module):
         )
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+        assert token_ids.ndim == 2
         token_embeddings = self.embedding(token_ids)
         token_embeddings = token_embeddings * math.sqrt(self.d_model)
         token_embeddings = self.position_encoding(token_embeddings)
@@ -127,6 +128,8 @@ class Decoder(nn.Module):
         target_token_ids: torch.Tensor,
         encoder_output: torch.Tensor,
     ) -> torch.Tensor:
+        assert target_token_ids.ndim == 2
+        assert encoder_output.ndim == 3
         target_token_embeddings = self.embedding(target_token_ids)
         target_token_embeddings = target_token_embeddings * math.sqrt(self.d_model)
         target_token_embeddings = self.position_encoding(target_token_embeddings)
@@ -200,4 +203,3 @@ class Transformer(nn.Module):
             return F.linear(decoder_output, self.decoder.embedding.weight)
 
         return self.output_projection(decoder_output)
-

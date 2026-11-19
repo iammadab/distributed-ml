@@ -33,6 +33,7 @@ class PositionalEncoding(nn.Module):
         self.encoding_table[:, 1::2] = torch.cos(pos * denoms)
 
     def forward(self, token_embeddings: torch.Tensor) -> torch.Tensor:
-        seq_len = len(token_embeddings)
+        assert token_embeddings.ndim == 3
+        seq_len = token_embeddings.size(-2)
         assert seq_len <= self.initial_seq_len
-        return token_embeddings + self.encoding_table[:seq_len]
+        return token_embeddings + self.encoding_table[:seq_len].unsqueeze(0)

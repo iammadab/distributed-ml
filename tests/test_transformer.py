@@ -18,12 +18,12 @@ class TransformerTest(unittest.TestCase):
             max_seq_len=10,
         )
 
-        source_token_ids = torch.randint(0, 100, (7,))
-        target_token_ids = torch.randint(0, 120, (5,))
+        source_token_ids = torch.randint(0, 100, (3, 7))
+        target_token_ids = torch.randint(0, 120, (3, 5))
 
         logits = model(source_token_ids, target_token_ids)
 
-        self.assertEqual(logits.shape, (5, 120))
+        self.assertEqual(logits.shape, (3, 5, 120))
         self.assertTrue(torch.isfinite(logits).all())
 
     def test_shared_embeddings_and_output_weights(self):
@@ -44,11 +44,11 @@ class TransformerTest(unittest.TestCase):
         self.assertIs(model.encoder.embedding, model.decoder.embedding)
         self.assertIs(model.decoder.embedding.weight, shared_embedding.weight)
 
-        source_token_ids = torch.randint(0, 100, (7,))
-        target_token_ids = torch.randint(0, 100, (5,))
+        source_token_ids = torch.randint(0, 100, (3, 7))
+        target_token_ids = torch.randint(0, 100, (3, 5))
         logits = model(source_token_ids, target_token_ids)
 
-        self.assertEqual(logits.shape, (5, 100))
+        self.assertEqual(logits.shape, (3, 5, 100))
         self.assertTrue(torch.isfinite(logits).all())
 
 
