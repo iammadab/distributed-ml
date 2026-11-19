@@ -51,6 +51,29 @@ class TransformerTest(unittest.TestCase):
         self.assertEqual(logits.shape, (3, 5, 100))
         self.assertTrue(torch.isfinite(logits).all())
 
+    def test_identical_batch_items_have_identical_outputs(self):
+        model = Transformer(
+            source_vocab_size=100,
+            target_vocab_size=120,
+            d_model=16,
+            d_ff=32,
+            n_heads=4,
+            n_layers=2,
+            max_seq_len=10,
+        )
+
+        # put the model in eval mode to disable dropout effects
+        model.eval()
+
+        source_item = torch.randint(0, 100, (7,))
+        target_item = torch.randint(0, 120, (5,))
+        source_token_ids = source_item.unsqueeze(0).repeat(2, 1)
+        target_token_ids = target_item.unsqueeze(0).repeat(2, 1)
+
+        logits = model(source_token_ids, target_token_ids)
+
+        self.assertTrue(torch.allclose(logits[0], logits[1], rtol=1e-5, atol=1e-6))
+
 
 if __name__ == "__main__":
     unittest.main()
