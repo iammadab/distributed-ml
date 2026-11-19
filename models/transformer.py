@@ -9,11 +9,11 @@ from layers import (
     Embedding,
     FFN,
     MaskedSelfAttention,
-    PositionalEncoding,
     SelfAttention,
     SublayerConnection,
 )
 from .config import TransformerConfig
+from layers.positional import SinusoidalPositionalEncoding
 
 
 class EncoderLayer(nn.Module):
@@ -43,7 +43,10 @@ class Encoder(nn.Module):
             config.source_vocab_size,
             config.d_model,
         )
-        self.position_encoding = PositionalEncoding(config.d_model, config.max_seq_len)
+        self.position_encoding = SinusoidalPositionalEncoding(
+            config.d_model,
+            config.max_seq_len,
+        )
         self.embedding_dropout = nn.Dropout(config.dropout)
         self.layers = nn.ModuleList(
             [EncoderLayer(config) for _ in range(config.n_layers)]
@@ -104,7 +107,10 @@ class Decoder(nn.Module):
             config.target_vocab_size,
             config.d_model,
         )
-        self.position_encoding = PositionalEncoding(config.d_model, config.max_seq_len)
+        self.position_encoding = SinusoidalPositionalEncoding(
+            config.d_model,
+            config.max_seq_len,
+        )
         self.embedding_dropout = nn.Dropout(config.dropout)
         self.layers = nn.ModuleList(
             [DecoderLayer(config) for _ in range(config.n_layers)]
