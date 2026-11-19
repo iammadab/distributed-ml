@@ -38,11 +38,11 @@ class Embedding(nn.Module):
 
     def __init__(self, vocab_size: int, d_model: int):
         super().__init__()
-        self.embedding_matrix = nn.Parameter(init_weights((vocab_size, d_model)))
+        self.embedding = nn.Embedding(vocab_size, d_model)
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         # look up the embedding for each token
-        return self.embedding_matrix[token_ids]
+        return self.embedding(token_ids)
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model: int, initial_seq_len: int):
@@ -452,9 +452,6 @@ def tokenizer(str):
     """
     n_words = len(str.split())
     return torch.randint(0, 100, (n_words,))
-
-def init_weights(shape):
-    return torch.empty(shape).normal_(mean=0.0, std=0.02)
 
 if __name__ == "__main__":
     main()
