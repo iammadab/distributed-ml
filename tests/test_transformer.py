@@ -2,7 +2,7 @@ import unittest
 
 import torch
 
-from main import Transformer
+from models import Transformer
 
 
 class TransformerTest(unittest.TestCase):
