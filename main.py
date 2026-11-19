@@ -41,6 +41,7 @@ class Embedding(nn.Module):
         self.embedding_matrix = nn.Parameter(init_weights((vocab_size, d_model)))
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+        # look up the embedding for each token
         return self.embedding_matrix[token_ids]
 
 class PositionalEncoding(nn.Module):
@@ -111,7 +112,7 @@ class SublayerConnection(nn.Module):
         self.sublayer = sublayer
         self.layer_norm = nn.LayerNorm(d_model)
 
-    def forward(self, token_embeddings: torch.Tensor):
+    def forward(self, token_embeddings: torch.Tensor, **kwargs):
         """
         Computes LayerNorm(x + SubLayer(x))
 
@@ -121,7 +122,13 @@ class SublayerConnection(nn.Module):
         Returns:
             torch.Tensor: infused token embeddings of shape (seq_len, d_model)
         """
-        return self.layer_norm(token_embeddings + self.sublayer(token_embeddings))
+
+        # implements post-norm
+        sublayer_output = self.sublayer(
+            token_embeddings=token_embeddings,
+            **kwargs,
+        )
+        return self.layer_norm(token_embeddings + sublayer_output)
 
 class FFN(nn.Module):
     def __init__(self, d_model: int, d_ff: int):
@@ -154,19 +161,30 @@ class SelfAttention(nn.Module):
         self.n_heads = n_heads
         self.d_k = d_model // n_heads
 
-        # contains W_q, W_k and W_v
+        # projects each token into concatenated query, key, and value activations
         self.projection_matrix = nn.Linear(d_model, 3 * d_model)
         self.output_matrix = nn.Linear(d_model, d_model)
 
     def forward(self, token_embeddings: torch.Tensor):
+        # shape: [seq_len, 3 * d_model]
         projection = self.projection_matrix(token_embeddings)
+
+        # Split the projected activations along the feature dimension.
+        # Each result has shape [seq_len, d_model].
         q, k, v = projection.chunk(3, dim = -1)
 
+        # Each token currently has all features for all heads.
+        # Reshape so each head gets d_k features per token:
+        # [seq_len, d_model] -> [n_heads, seq_len, d_k].
         q = split_heads(q, self.n_heads, self.d_k)
         k = split_heads(k, self.n_heads, self.d_k)
         v = split_heads(v, self.n_heads, self.d_k)
 
+        # Compute attention independently for each head, then concatenate
+        # the heads back into [seq_len, d_model].
         context = merge_heads(attention(q, k, v))
+
+        # Mix information from the different heads.
         return self.output_matrix(context)
 
 class CrossAttention(nn.Module):
@@ -185,9 +203,13 @@ class CrossAttention(nn.Module):
         self.q_projection_matrix = nn.Linear(d_model, d_model)
         self.output_matrix = nn.Linear(d_model, d_model)
 
-    def forward(self, src_token_embeddings: torch.Tensor, target_token_embeddings: torch.Tensor):
-        kv_projection = self.kv_projection_matrix(src_token_embeddings)
-        q = self.q_projection_matrix(target_token_embeddings)
+    def forward(
+        self,
+        token_embeddings: torch.Tensor,
+        encoder_output: torch.Tensor,
+    ):
+        kv_projection = self.kv_projection_matrix(encoder_output)
+        q = self.q_projection_matrix(token_embeddings)
         k, v = kv_projection.chunk(2, dim = -1)
 
         q = split_heads(q, self.n_heads, self.d_k)
@@ -207,7 +229,7 @@ class MaskedSelfAttention(nn.Module):
         self.n_heads = n_heads
         self.d_k = d_model // n_heads
 
-        # contains W_q, W_k and W_v
+        # projects each token into concatenated query, key, and value activations
         self.qkv_projection_matrix = nn.Linear(d_model, 3 * d_model)
         self.output_matrix = nn.Linear(d_model, d_model)
 
@@ -220,6 +242,10 @@ class MaskedSelfAttention(nn.Module):
         v = split_heads(v, self.n_heads, self.d_k)
 
         seq_len = token_embeddings.size(0)
+        
+        # Create a causal mask with shape [seq_len, seq_len].
+        # True allows attention to the current or a previous token;
+        # False blocks attention to future tokens.
         mask = torch.tril(
             torch.ones((seq_len, seq_len), dtype=torch.bool, device=token_embeddings.device)
         )
@@ -240,13 +266,17 @@ def merge_heads(x: torch.Tensor) -> torch.Tensor:
     return x.transpose(0, 1).reshape(seq_len, n_heads * d_k)
 
 def attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask = None) -> torch.Tensor:
+    # q \cdot k^T
     scores = q @ k.transpose(-1, -2)
+    # qk^T / sqrt(d_k)
     scores = scores / math.sqrt(q.size(-1))
 
     if mask is not None:
         scores = scores.masked_fill(~mask, float("-inf"))
 
+    # softmax on the inner dimension
     weights = torch.softmax(scores, dim = -1)
+
     return weights @ v
 
 
@@ -306,8 +336,10 @@ class DecoderLayer(nn.Module):
             d_model,
             MaskedSelfAttention(d_model, n_heads),
         )
-        self.cross_attention = CrossAttention(d_model, n_heads)
-        self.cross_attention_norm = nn.LayerNorm(d_model)
+        self.cross_attention_connection = SublayerConnection(
+            d_model,
+            CrossAttention(d_model, n_heads),
+        )
         self.ffn_connection = SublayerConnection(
             d_model,
             FFN(d_model, d_ff),
@@ -322,12 +354,9 @@ class DecoderLayer(nn.Module):
             target_token_embeddings
         )
 
-        cross_attention_output = self.cross_attention(
-            encoder_output,
-            target_token_embeddings,
-        )
-        target_token_embeddings = self.cross_attention_norm(
-            target_token_embeddings + cross_attention_output
+        target_token_embeddings = self.cross_attention_connection(
+            token_embeddings=target_token_embeddings,
+            encoder_output=encoder_output,
         )
 
         return self.ffn_connection(target_token_embeddings)
