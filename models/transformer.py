@@ -15,15 +15,17 @@ from layers import (
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, d_model: int, d_ff: int, n_heads: int):
+    def __init__(self, d_model: int, d_ff: int, n_heads: int, dropout: float):
         super().__init__()
         self.attention_connection = SublayerConnection(
             d_model,
             SelfAttention(d_model, n_heads),
+            dropout,
         )
         self.ffn_connection = SublayerConnection(
             d_model,
             FFN(d_model, d_ff),
+            dropout,
         )
 
     def forward(self, token_embeddings: torch.Tensor) -> torch.Tensor:
@@ -40,19 +42,22 @@ class Encoder(nn.Module):
         n_heads: int,
         n_layers: int,
         max_seq_len: int,
+        dropout: float,
     ):
         super().__init__()
         self.d_model = d_model
         self.embedding = Embedding(vocab_size, d_model)
         self.position_encoding = PositionalEncoding(d_model, max_seq_len)
+        self.embedding_dropout = nn.Dropout(dropout)
         self.layers = nn.ModuleList(
-            [EncoderLayer(d_model, d_ff, n_heads) for _ in range(n_layers)]
+            [EncoderLayer(d_model, d_ff, n_heads, dropout) for _ in range(n_layers)]
         )
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         token_embeddings = self.embedding(token_ids)
         token_embeddings = token_embeddings * math.sqrt(self.d_model)
         token_embeddings = self.position_encoding(token_embeddings)
+        token_embeddings = self.embedding_dropout(token_embeddings)
 
         for layer in self.layers:
             token_embeddings = layer(token_embeddings)
@@ -61,19 +66,22 @@ class Encoder(nn.Module):
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, d_model: int, d_ff: int, n_heads: int):
+    def __init__(self, d_model: int, d_ff: int, n_heads: int, dropout: float):
         super().__init__()
         self.masked_attention_connection = SublayerConnection(
             d_model,
             MaskedSelfAttention(d_model, n_heads),
+            dropout,
         )
         self.cross_attention_connection = SublayerConnection(
             d_model,
             CrossAttention(d_model, n_heads),
+            dropout,
         )
         self.ffn_connection = SublayerConnection(
             d_model,
             FFN(d_model, d_ff),
+            dropout,
         )
 
     def forward(
@@ -100,13 +108,15 @@ class Decoder(nn.Module):
         n_heads: int,
         n_layers: int,
         max_seq_len: int,
+        dropout: float,
     ):
         super().__init__()
         self.d_model = d_model
         self.embedding = Embedding(target_vocab_size, d_model)
         self.position_encoding = PositionalEncoding(d_model, max_seq_len)
+        self.embedding_dropout = nn.Dropout(dropout)
         self.layers = nn.ModuleList(
-            [DecoderLayer(d_model, d_ff, n_heads) for _ in range(n_layers)]
+            [DecoderLayer(d_model, d_ff, n_heads, dropout) for _ in range(n_layers)]
         )
 
     def forward(
@@ -117,6 +127,7 @@ class Decoder(nn.Module):
         target_token_embeddings = self.embedding(target_token_ids)
         target_token_embeddings = target_token_embeddings * math.sqrt(self.d_model)
         target_token_embeddings = self.position_encoding(target_token_embeddings)
+        target_token_embeddings = self.embedding_dropout(target_token_embeddings)
 
         for layer in self.layers:
             target_token_embeddings = layer(
@@ -137,6 +148,7 @@ class Transformer(nn.Module):
         n_heads: int,
         n_layers: int,
         max_seq_len: int,
+        dropout: float = 0.1,
     ):
         super().__init__()
         self.encoder = Encoder(
@@ -146,6 +158,7 @@ class Transformer(nn.Module):
             n_heads,
             n_layers,
             max_seq_len,
+            dropout,
         )
         self.decoder = Decoder(
             target_vocab_size,
@@ -154,6 +167,7 @@ class Transformer(nn.Module):
             n_heads,
             n_layers,
             max_seq_len,
+            dropout,
         )
         self.output_projection = nn.Linear(d_model, target_vocab_size)
 
