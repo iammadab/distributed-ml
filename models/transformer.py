@@ -13,20 +13,21 @@ from layers import (
     SelfAttention,
     SublayerConnection,
 )
+from .config import TransformerConfig
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, d_model: int, d_ff: int, n_heads: int, dropout: float):
+    def __init__(self, config: TransformerConfig):
         super().__init__()
         self.attention_connection = SublayerConnection(
-            d_model,
-            SelfAttention(d_model, n_heads),
-            dropout,
+            config.d_model,
+            SelfAttention(config.d_model, config.n_heads),
+            config.dropout,
         )
         self.ffn_connection = SublayerConnection(
-            d_model,
-            FFN(d_model, d_ff),
-            dropout,
+            config.d_model,
+            FFN(config.d_model, config.d_ff),
+            config.dropout,
         )
 
     def forward(self, token_embeddings: torch.Tensor) -> torch.Tensor:
@@ -35,24 +36,17 @@ class EncoderLayer(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(
-        self,
-        vocab_size: int,
-        d_model: int,
-        d_ff: int,
-        n_heads: int,
-        n_layers: int,
-        max_seq_len: int,
-        dropout: float,
-        embedding: Embedding | None = None,
-    ):
+    def __init__(self, config: TransformerConfig, embedding: Embedding | None = None):
         super().__init__()
-        self.d_model = d_model
-        self.embedding = embedding if embedding is not None else Embedding(vocab_size, d_model)
-        self.position_encoding = PositionalEncoding(d_model, max_seq_len)
-        self.embedding_dropout = nn.Dropout(dropout)
+        self.d_model = config.d_model
+        self.embedding = embedding if embedding is not None else Embedding(
+            config.source_vocab_size,
+            config.d_model,
+        )
+        self.position_encoding = PositionalEncoding(config.d_model, config.max_seq_len)
+        self.embedding_dropout = nn.Dropout(config.dropout)
         self.layers = nn.ModuleList(
-            [EncoderLayer(d_model, d_ff, n_heads, dropout) for _ in range(n_layers)]
+            [EncoderLayer(config) for _ in range(config.n_layers)]
         )
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
@@ -69,22 +63,22 @@ class Encoder(nn.Module):
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, d_model: int, d_ff: int, n_heads: int, dropout: float):
+    def __init__(self, config: TransformerConfig):
         super().__init__()
         self.masked_attention_connection = SublayerConnection(
-            d_model,
-            MaskedSelfAttention(d_model, n_heads),
-            dropout,
+            config.d_model,
+            MaskedSelfAttention(config.d_model, config.n_heads),
+            config.dropout,
         )
         self.cross_attention_connection = SublayerConnection(
-            d_model,
-            CrossAttention(d_model, n_heads),
-            dropout,
+            config.d_model,
+            CrossAttention(config.d_model, config.n_heads),
+            config.dropout,
         )
         self.ffn_connection = SublayerConnection(
-            d_model,
-            FFN(d_model, d_ff),
-            dropout,
+            config.d_model,
+            FFN(config.d_model, config.d_ff),
+            config.dropout,
         )
 
     def forward(
@@ -103,24 +97,17 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(
-        self,
-        target_vocab_size: int,
-        d_model: int,
-        d_ff: int,
-        n_heads: int,
-        n_layers: int,
-        max_seq_len: int,
-        dropout: float,
-        embedding: Embedding | None = None,
-    ):
+    def __init__(self, config: TransformerConfig, embedding: Embedding | None = None):
         super().__init__()
-        self.d_model = d_model
-        self.embedding = embedding if embedding is not None else Embedding(target_vocab_size, d_model)
-        self.position_encoding = PositionalEncoding(d_model, max_seq_len)
-        self.embedding_dropout = nn.Dropout(dropout)
+        self.d_model = config.d_model
+        self.embedding = embedding if embedding is not None else Embedding(
+            config.target_vocab_size,
+            config.d_model,
+        )
+        self.position_encoding = PositionalEncoding(config.d_model, config.max_seq_len)
+        self.embedding_dropout = nn.Dropout(config.dropout)
         self.layers = nn.ModuleList(
-            [DecoderLayer(d_model, d_ff, n_heads, dropout) for _ in range(n_layers)]
+            [DecoderLayer(config) for _ in range(config.n_layers)]
         )
 
     def forward(
@@ -147,49 +134,32 @@ class Decoder(nn.Module):
 class Transformer(nn.Module):
     def __init__(
         self,
-        source_vocab_size: int,
-        target_vocab_size: int,
-        d_model: int,
-        d_ff: int,
-        n_heads: int,
-        n_layers: int,
-        max_seq_len: int,
-        dropout: float = 0.1,
+        config: TransformerConfig,
         encoder_embedding: Embedding | None = None,
         decoder_embedding: Embedding | None = None,
         tie_output_weights: bool = False,
     ):
         super().__init__()
-        self.encoder = Encoder(
-            source_vocab_size,
-            d_model,
-            d_ff,
-            n_heads,
-            n_layers,
-            max_seq_len,
-            dropout,
-            encoder_embedding,
-        )
-        self.decoder = Decoder(
-            target_vocab_size,
-            d_model,
-            d_ff,
-            n_heads,
-            n_layers,
-            max_seq_len,
-            dropout,
-            decoder_embedding,
-        )
+        self.config = config
+        self.encoder = Encoder(config, encoder_embedding)
+        self.decoder = Decoder(config, decoder_embedding)
         self.tie_output_weights = tie_output_weights
         if tie_output_weights:
-            if self.decoder.embedding.weight.shape != (target_vocab_size, d_model):
+            if self.decoder.embedding.weight.shape != (
+                config.target_vocab_size,
+                config.d_model,
+            ):
                 raise ValueError(
                     "decoder_embedding must have shape "
-                    f"({target_vocab_size}, {d_model}) when tying output weights"
+                    f"({config.target_vocab_size}, {config.d_model}) "
+                    "when tying output weights"
                 )
             self.output_projection = None
         else:
-            self.output_projection = nn.Linear(d_model, target_vocab_size)
+            self.output_projection = nn.Linear(
+                config.d_model,
+                config.target_vocab_size,
+            )
 
     def forward(
         self,

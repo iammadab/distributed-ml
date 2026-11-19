@@ -3,12 +3,12 @@ import unittest
 import torch
 
 from layers import Embedding
-from models import Transformer
+from models import Transformer, TransformerConfig
 
 
 class TransformerTest(unittest.TestCase):
     def test_forward_pass(self):
-        model = Transformer(
+        config = TransformerConfig(
             source_vocab_size=100,
             target_vocab_size=120,
             d_model=16,
@@ -17,6 +17,7 @@ class TransformerTest(unittest.TestCase):
             n_layers=2,
             max_seq_len=10,
         )
+        model = Transformer(config)
 
         source_token_ids = torch.randint(0, 100, (3, 7))
         target_token_ids = torch.randint(0, 120, (3, 5))
@@ -28,7 +29,7 @@ class TransformerTest(unittest.TestCase):
 
     def test_shared_embeddings_and_output_weights(self):
         shared_embedding = Embedding(vocab_size=100, d_model=16)
-        model = Transformer(
+        config = TransformerConfig(
             source_vocab_size=100,
             target_vocab_size=100,
             d_model=16,
@@ -36,6 +37,9 @@ class TransformerTest(unittest.TestCase):
             n_heads=4,
             n_layers=2,
             max_seq_len=10,
+        )
+        model = Transformer(
+            config,
             encoder_embedding=shared_embedding,
             decoder_embedding=shared_embedding,
             tie_output_weights=True,
@@ -52,7 +56,7 @@ class TransformerTest(unittest.TestCase):
         self.assertTrue(torch.isfinite(logits).all())
 
     def test_identical_batch_items_have_identical_outputs(self):
-        model = Transformer(
+        config = TransformerConfig(
             source_vocab_size=100,
             target_vocab_size=120,
             d_model=16,
@@ -61,6 +65,7 @@ class TransformerTest(unittest.TestCase):
             n_layers=2,
             max_seq_len=10,
         )
+        model = Transformer(config)
 
         # put the model in eval mode to disable dropout effects
         model.eval()
