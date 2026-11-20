@@ -82,12 +82,13 @@ def _load_json(path: Path) -> Any:
 def _load_phases(trace: dict[str, Any], start_timestamp: int) -> list[Phase]:
     phase_names = {"forward", "loss", "backward", "optimizer_step"}
     phases = []
+    trace_start_timestamp = trace.get("baseTimeNanoseconds", 0) / 1_000
 
     for event in trace.get("traceEvents", []):
         if event.get("name") not in phase_names or event.get("ph") != "X":
             continue
 
-        event_start = event["ts"]
+        event_start = trace_start_timestamp + event["ts"]
         phases.append(
             Phase(
                 name=event["name"],

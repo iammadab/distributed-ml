@@ -17,6 +17,17 @@ CATEGORY_LABELS = {
     "unclassified": "Unclassified",
 }
 
+CATEGORY_COLORS = {
+    "parameters": "#636EFA",
+    "optimizer_state": "#EF553B",
+    "input": "#00CC96",
+    "temporary": "#AB63FA",
+    "activation": "#FFA15A",
+    "gradient": "#19D3F3",
+    "autograd_detail": "#FF6692",
+    "unclassified": "#B6E880",
+}
+
 
 def write_memory_visualizer(profile: MemoryProfile, output_path: Path) -> None:
     """Write an interactive memory visualizer as a standalone HTML file."""
@@ -37,6 +48,21 @@ def _build_figure(profile: MemoryProfile) -> go.Figure:
 
     times = [point.time_ms for point in profile.points]
     total_memory = [_to_mib(point.total_bytes) for point in profile.points]
+    for category in MEMORY_CATEGORIES:
+        figure.add_trace(
+            go.Scatter(
+                x=times,
+                y=[_to_mib(point.categories[category]) for point in profile.points],
+                mode="lines",
+                name=CATEGORY_LABELS[category],
+                stackgroup="memory",
+                line={"color": CATEGORY_COLORS[category]},
+                fillcolor=CATEGORY_COLORS[category],
+            ),
+            row=1,
+            col=1,
+        )
+
     figure.add_trace(
         go.Scatter(
             x=times,
@@ -61,6 +87,9 @@ def _build_figure(profile: MemoryProfile) -> go.Figure:
                 mode="lines",
                 name=CATEGORY_LABELS[category],
                 showlegend=False,
+                fill="tozeroy",
+                fillcolor=CATEGORY_COLORS[category],
+                line={"color": CATEGORY_COLORS[category]},
             ),
             row=category_index,
             col=1,
@@ -76,15 +105,26 @@ def _build_figure(profile: MemoryProfile) -> go.Figure:
                 row=row,
                 col=1,
             )
-        figure.add_annotation(
-            x=phase.start_ms,
-            y=1.02,
-            xref="x",
-            yref="paper",
-            text=phase.name,
-            showarrow=False,
-            textangle=-45,
-        )
+            figure.add_vline(
+                x=phase.end_ms,
+                line_dash="dot",
+                line_color="gray",
+                opacity=0.7,
+                row=row,
+                col=1,
+            )
+        for row in range(1, row_count + 1):
+            yref = "y domain" if row == 1 else f"y{row} domain"
+            figure.add_annotation(
+                x=phase.start_ms,
+                y=1.04,
+                xref="x",
+                yref=yref,
+                text=phase.name,
+                showarrow=False,
+                textangle=-45,
+                font={"size": 9},
+            )
 
     figure.update_yaxes(title_text="MiB", row=1, col=1)
     for row in range(2, row_count + 1):
