@@ -36,11 +36,17 @@ class MemoryProfile:
     phases: list[Phase]
     peak_memory_bytes: int
     duration_ms: float
+    device: str
+    peak_allocated_bytes: int | None
+    peak_reserved_bytes: int | None
 
 
 def load_memory_profile(
     trace_path: Path,
     memory_timeline_path: Path,
+    device: str = "cpu",
+    peak_allocated_bytes: int | None = None,
+    peak_reserved_bytes: int | None = None,
 ) -> MemoryProfile:
     """Load profiler output into data structures used by the visualizer."""
     trace = _load_json(trace_path)
@@ -71,6 +77,9 @@ def load_memory_profile(
         phases=phases,
         peak_memory_bytes=max(point.total_bytes for point in points),
         duration_ms=points[-1].time_ms,
+        device=device,
+        peak_allocated_bytes=peak_allocated_bytes,
+        peak_reserved_bytes=peak_reserved_bytes,
     )
 
 
