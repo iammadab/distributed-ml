@@ -9,4 +9,7 @@ wheels/
 # Virtual environments
 .venv
 
+# Profiling traces
+traces/
+
 todo.txt
