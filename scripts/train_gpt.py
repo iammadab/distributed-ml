@@ -14,7 +14,6 @@ from models.gpt import GPT, GPTConfig
 VOCAB_SIZE = 40_478
 SEQUENCE_LENGTH = 512
 BATCH_SIZE = 2
-NUM_STEPS = 5
 
 
 def train_step(
@@ -79,16 +78,17 @@ def main() -> None:
         activities=[torch.profiler.ProfilerActivity.CPU],
         profile_memory=True,
         record_shapes=True,
+        with_stack=True,
     ) as profiler:
         loss = train_step(model, optimizer, token_ids)
         profiler.step()
 
     profiler.export_chrome_trace("traces/gpt_memory.json")
+    profiler.export_memory_timeline(
+        "traces/gpt_memory_timeline.json",
+        device="cpu",
+    )
     print(f"step 0: loss: {loss.item():.4f}")
-
-    for step in range(1, NUM_STEPS):
-        loss = train_step(model, optimizer, token_ids)
-        print(f"step {step}: loss: {loss.item():.4f}")
 
 
 if __name__ == "__main__":
