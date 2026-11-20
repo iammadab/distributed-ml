@@ -28,20 +28,22 @@ def train_step(
 
     optimizer.zero_grad()
 
-    # Forward pass.
-    logits = model(inputs)
+    with torch.profiler.record_function("forward"):
+        logits = model(inputs)
 
-    # Compute the next-token prediction loss.
-    loss = F.cross_entropy(
-        # [batch, seq_len, vocab_size] => [batch * seq_len, vocab_size]
-        logits.reshape(-1, logits.size(-1)),
-        # [batch, seq_len] => [batch * seq_len]
-        targets.reshape(-1),
-    )
+    with torch.profiler.record_function("loss"):
+        loss = F.cross_entropy(
+            # [batch, seq_len, vocab_size] => [batch * seq_len, vocab_size]
+            logits.reshape(-1, logits.size(-1)),
+            # [batch, seq_len] => [batch * seq_len]
+            targets.reshape(-1),
+        )
 
-    # Backward pass and optimization step.
-    loss.backward()
-    optimizer.step()
+    with torch.profiler.record_function("backward"):
+        loss.backward()
+
+    with torch.profiler.record_function("optimizer_step"):
+        optimizer.step()
 
     return loss
 
@@ -71,7 +73,20 @@ def main() -> None:
         (BATCH_SIZE, SEQUENCE_LENGTH),
     )
 
-    for step in range(NUM_STEPS):
+    Path("traces").mkdir(exist_ok=True)
+
+    with torch.profiler.profile(
+        activities=[torch.profiler.ProfilerActivity.CPU],
+        profile_memory=True,
+        record_shapes=True,
+    ) as profiler:
+        loss = train_step(model, optimizer, token_ids)
+        profiler.step()
+
+    profiler.export_chrome_trace("traces/gpt_memory.json")
+    print(f"step 0: loss: {loss.item():.4f}")
+
+    for step in range(1, NUM_STEPS):
         loss = train_step(model, optimizer, token_ids)
         print(f"step {step}: loss: {loss.item():.4f}")
 
