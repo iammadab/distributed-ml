@@ -14,6 +14,36 @@ from models.gpt import GPT, GPTConfig
 VOCAB_SIZE = 40_478
 SEQUENCE_LENGTH = 512
 BATCH_SIZE = 2
+NUM_STEPS = 5
+
+
+def train_step(
+    model: GPT,
+    optimizer: torch.optim.Optimizer,
+    token_ids: torch.Tensor,
+) -> torch.Tensor:
+    # The input is all but the last token; the target is all but the first.
+    inputs = token_ids[:, :-1]
+    targets = token_ids[:, 1:]
+
+    optimizer.zero_grad()
+
+    # Forward pass.
+    logits = model(inputs)
+
+    # Compute the next-token prediction loss.
+    loss = F.cross_entropy(
+        # [batch, seq_len, vocab_size] => [batch * seq_len, vocab_size]
+        logits.reshape(-1, logits.size(-1)),
+        # [batch, seq_len] => [batch * seq_len]
+        targets.reshape(-1),
+    )
+
+    # Backward pass and optimization step.
+    loss.backward()
+    optimizer.step()
+
+    return loss
 
 
 def main() -> None:
@@ -41,31 +71,9 @@ def main() -> None:
         (BATCH_SIZE, SEQUENCE_LENGTH),
     )
 
-    # the input is all but the last token
-    inputs = token_ids[:, :-1]
-    # all but the first token
-    targets = token_ids[:, 1:]
-
-    optimizer.zero_grad()
-
-    # forward pass
-    logits = model(inputs)
-
-    # compute the loss
-    loss = F.cross_entropy(
-        # [batch, seq_len, vocab_size] => [batch * seq_len, vocab_size]
-        logits.reshape(-1, logits.size(-1)),
-        # [batch, seq_len] => [batch * seq_len]
-        targets.reshape(-1),
-    )
-
-    # backward step
-    loss.backward()
-
-    # optimization step
-    optimizer.step()
-
-    print(f"loss: {loss.item():.4f}")
+    for step in range(NUM_STEPS):
+        loss = train_step(model, optimizer, token_ids)
+        print(f"step {step}: loss: {loss.item():.4f}")
 
 
 if __name__ == "__main__":
