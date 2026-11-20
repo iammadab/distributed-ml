@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import os
 
 import torch
 import torch.nn.functional as F
@@ -9,6 +10,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from layers import Embedding
 from models.gpt import GPT, GPTConfig
+from profiling import (
+    collect_memory_profile,
+    load_memory_profile,
+    serve_visualizer,
+    write_memory_visualizer,
+)
 
 
 VOCAB_SIZE = 40_478
@@ -72,23 +79,21 @@ def main() -> None:
         (BATCH_SIZE, SEQUENCE_LENGTH),
     )
 
-    Path("traces").mkdir(exist_ok=True)
-
-    with torch.profiler.profile(
-        activities=[torch.profiler.ProfilerActivity.CPU],
-        profile_memory=True,
-        record_shapes=True,
-        with_stack=True,
-    ) as profiler:
+    if os.getenv("PROFILE_MEMORY") == "1":
+        artifacts = collect_memory_profile(
+            step_fn=lambda: train_step(model, optimizer, token_ids),
+            output_dir=Path("traces"),
+        )
+        profile = load_memory_profile(
+            artifacts.trace_path,
+            artifacts.memory_timeline_path,
+        )
+        visualizer_path = Path("traces/gpt_memory.html")
+        write_memory_visualizer(profile, visualizer_path)
+        serve_visualizer(visualizer_path)
+    else:
         loss = train_step(model, optimizer, token_ids)
-        profiler.step()
-
-    profiler.export_chrome_trace("traces/gpt_memory.json")
-    profiler.export_memory_timeline(
-        "traces/gpt_memory_timeline.json",
-        device="cpu",
-    )
-    print(f"step 0: loss: {loss.item():.4f}")
+        print(f"step 0: loss: {loss.item():.4f}")
 
 
 if __name__ == "__main__":
