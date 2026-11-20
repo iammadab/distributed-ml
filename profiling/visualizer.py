@@ -38,6 +38,7 @@ def write_memory_visualizer(profile: MemoryProfile, output_path: Path) -> None:
 
 def _build_figure(profile: MemoryProfile) -> go.Figure:
     row_count = len(MEMORY_CATEGORIES) + 1
+    unit, divisor = _memory_unit(profile.peak_memory_bytes)
     figure = make_subplots(
         rows=row_count,
         cols=1,
@@ -47,12 +48,12 @@ def _build_figure(profile: MemoryProfile) -> go.Figure:
     )
 
     times = [point.time_ms for point in profile.points]
-    total_memory = [_to_mib(point.total_bytes) for point in profile.points]
+    total_memory = [point.total_bytes / divisor for point in profile.points]
     for category in MEMORY_CATEGORIES:
         figure.add_trace(
             go.Scatter(
                 x=times,
-                y=[_to_mib(point.categories[category]) for point in profile.points],
+                y=[point.categories[category] / divisor for point in profile.points],
                 mode="lines",
                 name=CATEGORY_LABELS[category],
                 stackgroup="memory",
@@ -77,7 +78,7 @@ def _build_figure(profile: MemoryProfile) -> go.Figure:
 
     for category_index, category in enumerate(MEMORY_CATEGORIES, start=2):
         values = [
-            _to_mib(point.categories[category])
+            point.categories[category] / divisor
             for point in profile.points
         ]
         figure.add_trace(
@@ -126,14 +127,14 @@ def _build_figure(profile: MemoryProfile) -> go.Figure:
                 font={"size": 9},
             )
 
-    figure.update_yaxes(title_text="MiB", row=1, col=1)
+    figure.update_yaxes(title_text=unit, row=1, col=1)
     for row in range(2, row_count + 1):
-        figure.update_yaxes(title_text="MiB", row=row, col=1)
+        figure.update_yaxes(title_text=unit, row=row, col=1)
     figure.update_xaxes(title_text="Elapsed time (ms)", row=row_count, col=1)
     figure.update_layout(
         title=(
             "GPT memory profile "
-            f"(peak: {_to_mib(profile.peak_memory_bytes):.2f} MiB)"
+            f"(peak: {profile.peak_memory_bytes / divisor:.2f} {unit})"
         ),
         height=300 * row_count,
         hovermode="x unified",
@@ -142,5 +143,7 @@ def _build_figure(profile: MemoryProfile) -> go.Figure:
     return figure
 
 
-def _to_mib(byte_count: int) -> float:
-    return byte_count / (1024 * 1024)
+def _memory_unit(peak_memory_bytes: int) -> tuple[str, int]:
+    if peak_memory_bytes >= 1_000_000_000:
+        return "GB", 1_000_000_000
+    return "MB", 1_000_000
