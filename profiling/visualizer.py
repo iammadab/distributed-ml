@@ -38,7 +38,12 @@ def write_memory_visualizer(profile: MemoryProfile, output_path: Path) -> None:
 
 def _build_figure(profile: MemoryProfile) -> go.Figure:
     row_count = len(MEMORY_CATEGORIES) + 1
-    unit, divisor = _memory_unit(profile.peak_memory_bytes)
+    summary_peaks = [profile.peak_memory_bytes]
+    if profile.peak_allocated_bytes is not None:
+        summary_peaks.append(profile.peak_allocated_bytes)
+    if profile.peak_reserved_bytes is not None:
+        summary_peaks.append(profile.peak_reserved_bytes)
+    unit, divisor = _memory_unit(max(summary_peaks))
     figure = make_subplots(
         rows=row_count,
         cols=1,
@@ -75,6 +80,25 @@ def _build_figure(profile: MemoryProfile) -> go.Figure:
         row=1,
         col=1,
     )
+
+    if profile.peak_allocated_bytes is not None:
+        figure.add_hline(
+            y=profile.peak_allocated_bytes / divisor,
+            line_dash="dash",
+            line_color="#444444",
+            annotation_text="Peak allocated",
+            row=1,
+            col=1,
+        )
+    if profile.peak_reserved_bytes is not None:
+        figure.add_hline(
+            y=profile.peak_reserved_bytes / divisor,
+            line_dash="dot",
+            line_color="#444444",
+            annotation_text="Peak reserved",
+            row=1,
+            col=1,
+        )
 
     for category_index, category in enumerate(MEMORY_CATEGORIES, start=2):
         values = [
@@ -131,11 +155,17 @@ def _build_figure(profile: MemoryProfile) -> go.Figure:
     for row in range(2, row_count + 1):
         figure.update_yaxes(title_text=unit, row=row, col=1)
     figure.update_xaxes(title_text="Elapsed time (ms)", row=row_count, col=1)
+    summary = [
+        f"device: {profile.device}",
+        f"timeline peak: {profile.peak_memory_bytes / divisor:.2f} {unit}",
+    ]
+    if profile.peak_allocated_bytes is not None:
+        summary.append(f"peak allocated: {profile.peak_allocated_bytes / divisor:.2f} {unit}")
+    if profile.peak_reserved_bytes is not None:
+        summary.append(f"peak reserved: {profile.peak_reserved_bytes / divisor:.2f} {unit}")
+
     figure.update_layout(
-        title=(
-            "GPT memory profile "
-            f"(peak: {profile.peak_memory_bytes / divisor:.2f} {unit})"
-        ),
+        title="GPT memory profile<br><sup>" + " | ".join(summary) + "</sup>",
         height=300 * row_count,
         hovermode="x unified",
         template="plotly_white",

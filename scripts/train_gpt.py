@@ -55,6 +55,11 @@ def train_step(
 
 
 def main() -> None:
+    device = torch.device(os.getenv("DEVICE", "cpu"))
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested, but it is not available")
+    print(f"Running on device: {device}")
+
     config = GPTConfig(
         vocab_size=VOCAB_SIZE,
         max_seq_len=SEQUENCE_LENGTH,
@@ -63,7 +68,7 @@ def main() -> None:
         n_heads=12,
         n_layers=12,
     )
-    model = GPT(config, Embedding(config.vocab_size, config.d_model))
+    model = GPT(config, Embedding(config.vocab_size, config.d_model)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=2.5e-4)
 
     # count and print the total number of trainable parameters
@@ -77,16 +82,20 @@ def main() -> None:
         0,
         config.vocab_size,
         (BATCH_SIZE, SEQUENCE_LENGTH),
-    )
+    ).to(device)
 
     if os.getenv("PROFILE_MEMORY") == "1":
         artifacts = collect_memory_profile(
             step_fn=lambda: train_step(model, optimizer, token_ids),
             output_dir=Path("traces"),
+            device=device,
         )
         profile = load_memory_profile(
             artifacts.trace_path,
             artifacts.memory_timeline_path,
+            device=artifacts.device,
+            peak_allocated_bytes=artifacts.peak_allocated_bytes,
+            peak_reserved_bytes=artifacts.peak_reserved_bytes,
         )
         visualizer_path = Path("traces/gpt_memory.html")
         write_memory_visualizer(profile, visualizer_path)
