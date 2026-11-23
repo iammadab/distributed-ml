@@ -3,6 +3,8 @@ from contextlib import nullcontext
 from statistics import median
 from time import perf_counter
 from typing import Callable
+import json
+from pathlib import Path
 
 import torch
 
@@ -11,6 +13,14 @@ import torch
 class StepTiming:
     step_time_ms: float
     regions_ms: dict[str, float]
+
+
+def write_timing(timing: StepTiming, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps({
+        "step_time_ms": timing.step_time_ms,
+        "regions_ms": timing.regions_ms,
+    }, indent=2) + "\n")
 
 
 class Timer:

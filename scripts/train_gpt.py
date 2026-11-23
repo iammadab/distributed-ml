@@ -16,6 +16,7 @@ from profiling import (
     load_memory_profile,
     serve_visualizer,
     timed_region,
+    write_timing,
     write_memory_visualizer,
 )
 
@@ -87,7 +88,11 @@ def main() -> None:
         (BATCH_SIZE, SEQUENCE_LENGTH),
     ).to(device)
 
-    if os.getenv("PROFILE_MEMORY") == "1":
+    profile_requested = os.getenv("PROFILE") == "1" or os.getenv("PROFILE_MEMORY") == "1"
+    benchmark_requested = os.getenv("BENCHMARK") == "1"
+
+    profile = None
+    if profile_requested:
         artifacts = collect_memory_profile(
             step_fn=lambda: train_step(model, optimizer, token_ids),
             output_dir=Path("traces"),
@@ -100,10 +105,11 @@ def main() -> None:
             peak_allocated_bytes=artifacts.peak_allocated_bytes,
             peak_reserved_bytes=artifacts.peak_reserved_bytes,
         )
-        visualizer_path = Path("traces/gpt_memory.html")
-        write_memory_visualizer(profile, visualizer_path)
-        serve_visualizer(visualizer_path)
-    elif os.getenv("BENCHMARK") == "1":
+    timing = None
+    if benchmark_requested:
+        if profile_requested:
+            model = GPT(config, Embedding(config.vocab_size, config.d_model)).to(device)
+            optimizer = torch.optim.Adam(model.parameters(), lr=2.5e-4)
         timing = benchmark_training_step(
             step_fn=lambda timer: train_step(model, optimizer, token_ids, timer),
             device=device,
@@ -113,7 +119,13 @@ def main() -> None:
         print(f"step: {timing.step_time_ms:.2f} ms")
         for region, duration_ms in timing.regions_ms.items():
             print(f"{region}: {duration_ms:.2f} ms")
-    else:
+        write_timing(timing, Path("traces/gpt_timing.json"))
+
+    if profile_requested:
+        visualizer_path = Path("traces/gpt_memory.html")
+        write_memory_visualizer(profile, visualizer_path, timing=timing)
+        serve_visualizer(visualizer_path)
+    elif not benchmark_requested:
         loss = train_step(model, optimizer, token_ids)
         print(f"step 0: loss: {loss.item():.4f}")
 
