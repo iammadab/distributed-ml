@@ -2,6 +2,7 @@ import math
 
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 
 def split_heads(x: torch.Tensor, n_heads: int, d_k: int) -> torch.Tensor:
@@ -84,12 +85,13 @@ class CrossAttention(nn.Module):
 
 
 class MaskedSelfAttention(nn.Module):
-    def __init__(self, d_model: int, n_heads: int):
+    def __init__(self, d_model: int, n_heads: int, checkpoint_attention: bool = False):
         assert d_model % n_heads == 0
         super().__init__()
 
         self.n_heads = n_heads
         self.d_k = d_model // n_heads
+        self.checkpoint_attention = checkpoint_attention
         self.qkv_projection_matrix = nn.Linear(d_model, 3 * d_model)
         self.output_matrix = nn.Linear(d_model, d_model)
 
@@ -111,4 +113,16 @@ class MaskedSelfAttention(nn.Module):
             )
         )
 
-        return self.output_matrix(merge_heads(attention(q, k, v, mask)))
+        if self.checkpoint_attention:
+            attended = checkpoint(
+                attention,
+                q,
+                k,
+                v,
+                mask,
+                use_reentrant=False,
+            )
+        else:
+            attended = attention(q, k, v, mask)
+
+        return self.output_matrix(merge_heads(attended))
