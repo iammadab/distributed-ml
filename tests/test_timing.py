@@ -2,7 +2,9 @@ import unittest
 
 import torch
 
-from profiling import REGIONS, benchmark_training_step
+from profiling import benchmark_training_step
+
+REGIONS = ("forward", "loss", "backward", "optimizer_step")
 
 
 class TimingTest(unittest.TestCase):

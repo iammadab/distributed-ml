@@ -18,7 +18,6 @@ from profiling import (
     serve_visualizer,
     write_memory_visualizer,
 )
-from profiling.timing import REGIONS
 
 
 VOCAB_SIZE = 40_478
@@ -116,7 +115,7 @@ def main() -> None:
             measured_steps=int(os.getenv("BENCHMARK_STEPS", "3")),
         )
         print(f"step: {timing.step_time_ms:.2f} ms")
-        for region in REGIONS:
+        for region in ("forward", "loss", "backward", "optimizer_step"):
             print(f"{region}: {timing.regions_ms[region]:.2f} ms")
     else:
         loss = train_step(model, optimizer, token_ids)

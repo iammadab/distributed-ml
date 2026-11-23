@@ -6,9 +6,6 @@ from typing import Callable
 import torch
 
 
-REGIONS = ("forward", "loss", "backward", "optimizer_step")
-
-
 @dataclass(frozen=True)
 class StepTiming:
     step_time_ms: float
@@ -31,24 +28,20 @@ class StepTiming:
         return self.regions_ms["optimizer_step"]
 
 
-class _RegionTimer:
+class Timer:
     def __init__(self, device: torch.device):
         self.device = device
-        self.timings: dict[str, float] = {}
-        self.regions: dict[str, _TimedRegion] = {}
+        self.measurements: list[tuple[str, _Measurement]] = []
 
     def region(self, name: str):
-        if name not in REGIONS:
-            raise ValueError(f"unknown timing region: {name}")
-        timed_region = _TimedRegion(self, name)
-        self.regions[name] = timed_region
-        return timed_region
+        measurement = _Measurement(self)
+        self.measurements.append((name, measurement))
+        return measurement
 
 
-class _TimedRegion:
-    def __init__(self, timer: _RegionTimer, name: str):
+class _Measurement:
+    def __init__(self, timer: Timer):
         self.timer = timer
-        self.name = name
 
     def __enter__(self):
         if self.timer.device.type == "cuda":
@@ -64,7 +57,6 @@ class _TimedRegion:
             self.end.record()
         else:
             self.end = perf_counter()
-            self.timer.timings[self.name] = (self.end - self.start) * 1_000
 
     def elapsed_ms(self) -> float:
         if self.timer.device.type == "cuda":
@@ -73,7 +65,7 @@ class _TimedRegion:
 
 
 def benchmark_training_step(
-    step_fn: Callable[[_RegionTimer], object],
+    step_fn: Callable[[Timer | None], object],
     device: torch.device,
     warmup_steps: int = 1,
     measured_steps: int = 3,
@@ -90,15 +82,20 @@ def benchmark_training_step(
     for _ in range(measured_steps):
         _synchronize(device)
         start = perf_counter()
-        timer = _RegionTimer(device)
+        timer = Timer(device)
         step_fn(timer)
         _synchronize(device)
-        for region in REGIONS:
-            timer.timings[region] = timer.regions[region].elapsed_ms()
+        region_timings = {
+            name: measurement.elapsed_ms()
+            for name, measurement in timer.measurements
+        }
+        expected_regions = {"forward", "loss", "backward", "optimizer_step"}
+        if set(region_timings) != expected_regions:
+            raise ValueError(f"step_fn must measure {sorted(expected_regions)}")
         measurements.append(
             StepTiming(
                 step_time_ms=(perf_counter() - start) * 1_000,
-                regions_ms={region: timer.timings[region] for region in REGIONS},
+                regions_ms=region_timings,
             )
         )
 
@@ -106,7 +103,7 @@ def benchmark_training_step(
         step_time_ms=median(item.step_time_ms for item in measurements),
         regions_ms={
             region: median(item.regions_ms[region] for item in measurements)
-            for region in REGIONS
+            for region in ("forward", "loss", "backward", "optimizer_step")
         },
     )
 
