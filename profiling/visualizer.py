@@ -1,4 +1,5 @@
 from pathlib import Path
+from html import escape
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -38,7 +39,79 @@ def write_memory_visualizer(
     """Write an interactive memory visualizer as a standalone HTML file."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure = _build_figure(profile, timing)
-    figure.write_html(output_path, include_plotlyjs=True)
+    tables = _build_summary_tables(profile, timing)
+    output_path.write_text(
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<title>GPT memory profile</title>"
+        "<style>body{font-family:system-ui,sans-serif;margin:2rem;color:#222}"
+        "table{border-collapse:collapse;margin:1rem 0 2rem;min-width:32rem}"
+        "th,td{border:1px solid #ddd;padding:.45rem .7rem;text-align:right}"
+        "th:first-child,td:first-child{text-align:left}"
+        "h1,h2{margin-bottom:.4rem}</style></head><body>"
+        + tables
+        + figure.to_html(full_html=False, include_plotlyjs=True)
+        + "</body></html>"
+    )
+
+
+def _build_summary_tables(profile: MemoryProfile, timing: StepTiming | None) -> str:
+    peak_unit, peak_divisor = _memory_unit(profile.peak_memory_bytes)
+    total_peak_point = max(profile.points, key=lambda point: point.total_bytes)
+    composition = sorted(
+        total_peak_point.categories.items(),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    composition_rows = "".join(
+        "<tr><td>"
+        + escape(CATEGORY_LABELS[category])
+        + f"</td><td>{bytes_at_peak / peak_divisor:.2f} {peak_unit}</td>"
+        + f"<td>{bytes_at_peak / profile.peak_memory_bytes * 100:.1f}%</td></tr>"
+        for category, bytes_at_peak in composition
+    )
+    sorted_peaks = sorted(
+        profile.category_peaks.items(),
+        key=lambda item: item[1].bytes,
+        reverse=True,
+    )
+    rows = "".join(
+        "<tr><td>"
+        + escape(CATEGORY_LABELS[category])
+        + f"</td><td>{peak.bytes / peak_divisor:.2f} {peak_unit}</td>"
+        + f"<td>{peak.bytes / profile.peak_memory_bytes * 100:.1f}%</td>"
+        + f"<td>{peak.time_ms:.2f}</td></tr>"
+        for category, peak in sorted_peaks
+    )
+    timing_table = ""
+    if timing is not None:
+        timing_rows = "".join(
+            f"<tr><td>{escape(name)}</td><td>{duration_ms:.2f} ms</td></tr>"
+            for name, duration_ms in timing.regions_ms.items()
+        )
+        timing_table = (
+            "<h2>Benchmark timing</h2><table><tr><th>Region</th>"
+            "<th>Median duration</th></tr>"
+            f"<tr><td>Total step</td><td>{timing.step_time_ms:.2f} ms</td></tr>"
+            + timing_rows
+            + "</table>"
+        )
+    return (
+        "<h1>GPT memory profile</h1>"
+        "<h2>Peak composition</h2>"
+        f"<p>Total peak: {profile.peak_memory_bytes / peak_divisor:.2f} {peak_unit} "
+        f"at {profile.peak_memory_time_ms:.2f} ms</p>"
+        "<table><tr><th>Category</th><th>Memory at total peak</th>"
+        "<th>Share of total</th></tr>"
+        + composition_rows
+        + "</table>"
+        "<h2>Peak memory summary</h2><table>"
+        "<tr><th>Metric</th><th>Peak</th><th>Of total peak</th><th>Time (ms)</th></tr>"
+        f"<tr><td>Total memory</td><td>{profile.peak_memory_bytes / peak_divisor:.2f} {peak_unit}</td>"
+        f"<td>100.0%</td><td>{profile.peak_memory_time_ms:.2f}</td></tr>"
+        + rows
+        + "</table>"
+        + timing_table
+    )
 
 
 def _build_figure(profile: MemoryProfile, timing: StepTiming | None = None) -> go.Figure:

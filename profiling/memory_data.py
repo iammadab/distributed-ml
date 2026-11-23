@@ -24,6 +24,12 @@ class MemoryPoint:
 
 
 @dataclass(frozen=True)
+class MemoryPeak:
+    bytes: int
+    time_ms: float
+
+
+@dataclass(frozen=True)
 class Phase:
     name: str
     start_ms: float
@@ -35,6 +41,8 @@ class MemoryProfile:
     points: list[MemoryPoint]
     phases: list[Phase]
     peak_memory_bytes: int
+    peak_memory_time_ms: float
+    category_peaks: dict[str, MemoryPeak]
     duration_ms: float
     device: str
     peak_allocated_bytes: int | None
@@ -72,10 +80,23 @@ def load_memory_profile(
     ]
 
     phases = _load_phases(trace, start_timestamp)
+    category_peaks = {
+        category: MemoryPeak(
+            bytes=max(point.categories[category] for point in points),
+            time_ms=max(
+                points,
+                key=lambda point: point.categories[category],
+            ).time_ms,
+        )
+        for category in MEMORY_CATEGORIES
+    }
+    peak_point = max(points, key=lambda point: point.total_bytes)
     return MemoryProfile(
         points=points,
         phases=phases,
         peak_memory_bytes=max(point.total_bytes for point in points),
+        peak_memory_time_ms=peak_point.time_ms,
+        category_peaks=category_peaks,
         duration_ms=points[-1].time_ms,
         device=device,
         peak_allocated_bytes=peak_allocated_bytes,
