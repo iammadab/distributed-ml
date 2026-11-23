@@ -22,7 +22,6 @@ from profiling import (
 
 
 VOCAB_SIZE = 40_478
-SEQUENCE_LENGTH = 512
 BATCH_SIZE = 2
 
 
@@ -62,11 +61,16 @@ def main() -> None:
     device = torch.device(os.getenv("DEVICE", "cpu"))
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested, but it is not available")
+    sequence_length = int(os.getenv("SEQ_LEN", "512"))
+    if sequence_length <= 0:
+        raise ValueError("SEQ_LEN must be positive")
+
     print(f"Running on device: {device}")
+    print(f"Sequence length: {sequence_length}")
 
     config = GPTConfig(
         vocab_size=VOCAB_SIZE,
-        max_seq_len=SEQUENCE_LENGTH,
+        max_seq_len=sequence_length,
         d_model=768,
         d_ff=3_072,
         n_heads=12,
@@ -86,7 +90,7 @@ def main() -> None:
     token_ids = torch.randint(
         0,
         config.vocab_size,
-        (BATCH_SIZE, SEQUENCE_LENGTH),
+        (BATCH_SIZE, sequence_length),
     ).to(device)
 
     profile_requested = os.getenv("PROFILE") == "1" or os.getenv("PROFILE_MEMORY") == "1"
