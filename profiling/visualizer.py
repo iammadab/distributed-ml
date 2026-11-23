@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from .memory_data import MEMORY_CATEGORIES, MemoryProfile
+from .timing import StepTiming
 
 
 CATEGORY_LABELS = {
@@ -29,15 +30,20 @@ CATEGORY_COLORS = {
 }
 
 
-def write_memory_visualizer(profile: MemoryProfile, output_path: Path) -> None:
+def write_memory_visualizer(
+    profile: MemoryProfile,
+    output_path: Path,
+    timing: StepTiming | None = None,
+) -> None:
     """Write an interactive memory visualizer as a standalone HTML file."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    figure = _build_figure(profile)
+    figure = _build_figure(profile, timing)
     figure.write_html(output_path, include_plotlyjs=True)
 
 
-def _build_figure(profile: MemoryProfile) -> go.Figure:
-    row_count = len(MEMORY_CATEGORIES) + 1
+def _build_figure(profile: MemoryProfile, timing: StepTiming | None = None) -> go.Figure:
+    memory_rows = len(MEMORY_CATEGORIES) + 1
+    row_count = memory_rows + (1 if timing is not None else 0)
     summary_peaks = [profile.peak_memory_bytes]
     if profile.peak_allocated_bytes is not None:
         summary_peaks.append(profile.peak_allocated_bytes)
@@ -49,7 +55,11 @@ def _build_figure(profile: MemoryProfile) -> go.Figure:
         cols=1,
         shared_xaxes=True,
         vertical_spacing=0.025,
-        subplot_titles=("Total memory", *(CATEGORY_LABELS.values())),
+        subplot_titles=(
+            "Total memory",
+            *(CATEGORY_LABELS.values()),
+            *( ("Benchmark timing",) if timing is not None else () ),
+        ),
     )
 
     times = [point.time_ms for point in profile.points]
@@ -154,7 +164,23 @@ def _build_figure(profile: MemoryProfile) -> go.Figure:
     figure.update_yaxes(title_text=unit, row=1, col=1)
     for row in range(2, row_count + 1):
         figure.update_yaxes(title_text=unit, row=row, col=1)
-    figure.update_xaxes(title_text="Elapsed time (ms)", row=row_count, col=1)
+    if timing is not None:
+        timing_row = row_count
+        figure.add_trace(
+            go.Bar(
+                x=list(timing.regions_ms),
+                y=list(timing.regions_ms.values()),
+                name="Benchmark region time",
+                marker_color="#636EFA",
+            ),
+            row=timing_row,
+            col=1,
+        )
+        figure.update_yaxes(title_text="Milliseconds", row=timing_row, col=1)
+        figure.update_xaxes(title_text="Benchmark region", row=timing_row, col=1)
+    else:
+        timing_row = None
+    figure.update_xaxes(title_text="Elapsed time (ms)", row=memory_rows, col=1)
     summary = [
         f"device: {profile.device}",
         f"timeline peak: {profile.peak_memory_bytes / divisor:.2f} {unit}",
@@ -163,6 +189,8 @@ def _build_figure(profile: MemoryProfile) -> go.Figure:
         summary.append(f"peak allocated: {profile.peak_allocated_bytes / divisor:.2f} {unit}")
     if profile.peak_reserved_bytes is not None:
         summary.append(f"peak reserved: {profile.peak_reserved_bytes / divisor:.2f} {unit}")
+    if timing is not None:
+        summary.append(f"benchmark step: {timing.step_time_ms:.2f} ms")
 
     figure.update_layout(
         title="GPT memory profile<br><sup>" + " | ".join(summary) + "</sup>",

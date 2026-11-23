@@ -11,9 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from layers import Embedding
 from models.gpt import GPT, GPTConfig
 from profiling import (
+    benchmark_training_step,
     collect_memory_profile,
     load_memory_profile,
     serve_visualizer,
+    timed_region,
+    write_timing,
     write_memory_visualizer,
 )
 
@@ -27,6 +30,7 @@ def train_step(
     model: GPT,
     optimizer: torch.optim.Optimizer,
     token_ids: torch.Tensor,
+    timer=None,
 ) -> torch.Tensor:
     # The input is all but the last token; the target is all but the first.
     inputs = token_ids[:, :-1]
@@ -34,10 +38,10 @@ def train_step(
 
     optimizer.zero_grad()
 
-    with torch.profiler.record_function("forward"):
+    with torch.profiler.record_function("forward"), timed_region(timer, "forward"):
         logits = model(inputs)
 
-    with torch.profiler.record_function("loss"):
+    with torch.profiler.record_function("loss"), timed_region(timer, "loss"):
         loss = F.cross_entropy(
             # [batch, seq_len, vocab_size] => [batch * seq_len, vocab_size]
             logits.reshape(-1, logits.size(-1)),
@@ -45,10 +49,10 @@ def train_step(
             targets.reshape(-1),
         )
 
-    with torch.profiler.record_function("backward"):
+    with torch.profiler.record_function("backward"), timed_region(timer, "backward"):
         loss.backward()
 
-    with torch.profiler.record_function("optimizer_step"):
+    with torch.profiler.record_function("optimizer_step"), timed_region(timer, "optimizer_step"):
         optimizer.step()
 
     return loss
@@ -84,7 +88,11 @@ def main() -> None:
         (BATCH_SIZE, SEQUENCE_LENGTH),
     ).to(device)
 
-    if os.getenv("PROFILE_MEMORY") == "1":
+    profile_requested = os.getenv("PROFILE") == "1" or os.getenv("PROFILE_MEMORY") == "1"
+    benchmark_requested = os.getenv("BENCHMARK") == "1"
+
+    profile = None
+    if profile_requested:
         artifacts = collect_memory_profile(
             step_fn=lambda: train_step(model, optimizer, token_ids),
             output_dir=Path("traces"),
@@ -97,10 +105,27 @@ def main() -> None:
             peak_allocated_bytes=artifacts.peak_allocated_bytes,
             peak_reserved_bytes=artifacts.peak_reserved_bytes,
         )
+    timing = None
+    if benchmark_requested:
+        if profile_requested:
+            model = GPT(config, Embedding(config.vocab_size, config.d_model)).to(device)
+            optimizer = torch.optim.Adam(model.parameters(), lr=2.5e-4)
+        timing = benchmark_training_step(
+            step_fn=lambda timer: train_step(model, optimizer, token_ids, timer),
+            device=device,
+            warmup_steps=int(os.getenv("WARMUP_STEPS", "1")),
+            measured_steps=int(os.getenv("BENCHMARK_STEPS", "3")),
+        )
+        print(f"step: {timing.step_time_ms:.2f} ms")
+        for region, duration_ms in timing.regions_ms.items():
+            print(f"{region}: {duration_ms:.2f} ms")
+        write_timing(timing, Path("traces/gpt_timing.json"))
+
+    if profile_requested:
         visualizer_path = Path("traces/gpt_memory.html")
-        write_memory_visualizer(profile, visualizer_path)
+        write_memory_visualizer(profile, visualizer_path, timing=timing)
         serve_visualizer(visualizer_path)
-    else:
+    elif not benchmark_requested:
         loss = train_step(model, optimizer, token_ids)
         print(f"step 0: loss: {loss.item():.4f}")
 
