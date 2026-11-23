@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from contextlib import nullcontext
 from statistics import median
 from time import perf_counter
 from typing import Callable
@@ -10,22 +11,6 @@ import torch
 class StepTiming:
     step_time_ms: float
     regions_ms: dict[str, float]
-
-    @property
-    def forward_time_ms(self) -> float:
-        return self.regions_ms["forward"]
-
-    @property
-    def loss_time_ms(self) -> float:
-        return self.regions_ms["loss"]
-
-    @property
-    def backward_time_ms(self) -> float:
-        return self.regions_ms["backward"]
-
-    @property
-    def optimizer_step_time_ms(self) -> float:
-        return self.regions_ms["optimizer_step"]
 
 
 class Timer:
@@ -64,6 +49,10 @@ class _Measurement:
         return (self.end - self.start) * 1_000
 
 
+def timed_region(timer: Timer | None, name: str):
+    return nullcontext() if timer is None else timer.region(name)
+
+
 def benchmark_training_step(
     step_fn: Callable[[Timer | None], object],
     device: torch.device,
@@ -81,17 +70,14 @@ def benchmark_training_step(
     measurements = []
     for _ in range(measured_steps):
         _synchronize(device)
-        start = perf_counter()
         timer = Timer(device)
+        start = perf_counter()
         step_fn(timer)
         _synchronize(device)
         region_timings = {
             name: measurement.elapsed_ms()
             for name, measurement in timer.measurements
         }
-        expected_regions = {"forward", "loss", "backward", "optimizer_step"}
-        if set(region_timings) != expected_regions:
-            raise ValueError(f"step_fn must measure {sorted(expected_regions)}")
         measurements.append(
             StepTiming(
                 step_time_ms=(perf_counter() - start) * 1_000,
@@ -99,11 +85,15 @@ def benchmark_training_step(
             )
         )
 
+    region_names = set(measurements[0].regions_ms)
+    if any(set(item.regions_ms) != region_names for item in measurements[1:]):
+        raise ValueError("step_fn must measure the same regions on every step")
+
     return StepTiming(
         step_time_ms=median(item.step_time_ms for item in measurements),
         regions_ms={
             region: median(item.regions_ms[region] for item in measurements)
-            for region in ("forward", "loss", "backward", "optimizer_step")
+            for region in region_names
         },
     )
 

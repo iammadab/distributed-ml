@@ -2,7 +2,7 @@ from .collect import ProfileArtifacts, collect_memory_profile
 from .memory_data import MemoryPoint, MemoryProfile, Phase, load_memory_profile
 from .server import serve_visualizer
 from .visualizer import write_memory_visualizer
-from .timing import StepTiming, Timer, benchmark_training_step
+from .timing import StepTiming, Timer, benchmark_training_step, timed_region
 
 __all__ = [
     "MemoryPoint",
@@ -16,4 +16,5 @@ __all__ = [
     "StepTiming",
     "Timer",
     "benchmark_training_step",
+    "timed_region",
 ]

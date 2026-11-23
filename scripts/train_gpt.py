@@ -1,7 +1,6 @@
 from pathlib import Path
 import sys
 import os
-from contextlib import nullcontext
 
 import torch
 import torch.nn.functional as F
@@ -16,6 +15,7 @@ from profiling import (
     collect_memory_profile,
     load_memory_profile,
     serve_visualizer,
+    timed_region,
     write_memory_visualizer,
 )
 
@@ -37,10 +37,10 @@ def train_step(
 
     optimizer.zero_grad()
 
-    with torch.profiler.record_function("forward"), _timed_region(timer, "forward"):
+    with torch.profiler.record_function("forward"), timed_region(timer, "forward"):
         logits = model(inputs)
 
-    with torch.profiler.record_function("loss"), _timed_region(timer, "loss"):
+    with torch.profiler.record_function("loss"), timed_region(timer, "loss"):
         loss = F.cross_entropy(
             # [batch, seq_len, vocab_size] => [batch * seq_len, vocab_size]
             logits.reshape(-1, logits.size(-1)),
@@ -48,17 +48,13 @@ def train_step(
             targets.reshape(-1),
         )
 
-    with torch.profiler.record_function("backward"), _timed_region(timer, "backward"):
+    with torch.profiler.record_function("backward"), timed_region(timer, "backward"):
         loss.backward()
 
-    with torch.profiler.record_function("optimizer_step"), _timed_region(timer, "optimizer_step"):
+    with torch.profiler.record_function("optimizer_step"), timed_region(timer, "optimizer_step"):
         optimizer.step()
 
     return loss
-
-
-def _timed_region(timer, name):
-    return nullcontext() if timer is None else timer.region(name)
 
 
 def main() -> None:
