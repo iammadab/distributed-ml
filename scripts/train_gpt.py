@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import os
+from contextlib import nullcontext
 
 import torch
 import torch.nn.functional as F
@@ -11,11 +12,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from layers import Embedding
 from models.gpt import GPT, GPTConfig
 from profiling import (
+    benchmark_training_step,
     collect_memory_profile,
     load_memory_profile,
     serve_visualizer,
     write_memory_visualizer,
 )
+from profiling.timing import REGIONS
 
 
 VOCAB_SIZE = 40_478
@@ -27,6 +30,7 @@ def train_step(
     model: GPT,
     optimizer: torch.optim.Optimizer,
     token_ids: torch.Tensor,
+    timer=None,
 ) -> torch.Tensor:
     # The input is all but the last token; the target is all but the first.
     inputs = token_ids[:, :-1]
@@ -34,10 +38,10 @@ def train_step(
 
     optimizer.zero_grad()
 
-    with torch.profiler.record_function("forward"):
+    with torch.profiler.record_function("forward"), _timed_region(timer, "forward"):
         logits = model(inputs)
 
-    with torch.profiler.record_function("loss"):
+    with torch.profiler.record_function("loss"), _timed_region(timer, "loss"):
         loss = F.cross_entropy(
             # [batch, seq_len, vocab_size] => [batch * seq_len, vocab_size]
             logits.reshape(-1, logits.size(-1)),
@@ -45,13 +49,17 @@ def train_step(
             targets.reshape(-1),
         )
 
-    with torch.profiler.record_function("backward"):
+    with torch.profiler.record_function("backward"), _timed_region(timer, "backward"):
         loss.backward()
 
-    with torch.profiler.record_function("optimizer_step"):
+    with torch.profiler.record_function("optimizer_step"), _timed_region(timer, "optimizer_step"):
         optimizer.step()
 
     return loss
+
+
+def _timed_region(timer, name):
+    return nullcontext() if timer is None else timer.region(name)
 
 
 def main() -> None:
@@ -100,6 +108,16 @@ def main() -> None:
         visualizer_path = Path("traces/gpt_memory.html")
         write_memory_visualizer(profile, visualizer_path)
         serve_visualizer(visualizer_path)
+    elif os.getenv("BENCHMARK") == "1":
+        timing = benchmark_training_step(
+            step_fn=lambda timer: train_step(model, optimizer, token_ids, timer),
+            device=device,
+            warmup_steps=int(os.getenv("WARMUP_STEPS", "1")),
+            measured_steps=int(os.getenv("BENCHMARK_STEPS", "3")),
+        )
+        print(f"step: {timing.step_time_ms:.2f} ms")
+        for region in REGIONS:
+            print(f"{region}: {timing.regions_ms[region]:.2f} ms")
     else:
         loss = train_step(model, optimizer, token_ids)
         print(f"step 0: loss: {loss.item():.4f}")
