@@ -1,6 +1,7 @@
 import unittest
 
 import torch
+import torch.nn.functional as F
 
 from layers import Embedding
 from models.gpt import GPT, GPTConfig
@@ -53,6 +54,60 @@ class GPTTest(unittest.TestCase):
         logits = model(token_item.unsqueeze(0).repeat(2, 1))
 
         self.assertTrue(torch.allclose(logits[0], logits[1], rtol=1e-5, atol=3e-6))
+
+    def test_activation_recomputation_matches_training_update(self):
+        config = GPTConfig(
+            vocab_size=100,
+            max_seq_len=10,
+            d_model=16,
+            d_ff=32,
+            n_heads=4,
+            n_layers=2,
+            dropout=0.0,
+        )
+        baseline = GPT(config, Embedding(config.vocab_size, config.d_model))
+        recomputed_config = GPTConfig(
+            vocab_size=100,
+            max_seq_len=10,
+            d_model=16,
+            d_ff=32,
+            n_heads=4,
+            n_layers=2,
+            dropout=0.0,
+            activation_recomputation=True,
+        )
+        recomputed = GPT(
+            recomputed_config,
+            Embedding(config.vocab_size, config.d_model),
+        )
+        recomputed.load_state_dict(baseline.state_dict())
+
+        baseline_optimizer = torch.optim.Adam(baseline.parameters(), lr=1e-3)
+        recomputed_optimizer = torch.optim.Adam(recomputed.parameters(), lr=1e-3)
+        token_ids = torch.randint(0, config.vocab_size, (3, 7))
+        targets = torch.randint(0, config.vocab_size, (3, 7))
+
+        baseline_logits = baseline(token_ids)
+        recomputed_logits = recomputed(token_ids)
+        self.assertTrue(torch.allclose(baseline_logits, recomputed_logits))
+
+        baseline_loss = F.cross_entropy(baseline_logits.reshape(-1, 100), targets.reshape(-1))
+        recomputed_loss = F.cross_entropy(recomputed_logits.reshape(-1, 100), targets.reshape(-1))
+        baseline_loss.backward()
+        recomputed_loss.backward()
+
+        for baseline_parameter, recomputed_parameter in zip(
+            baseline.parameters(), recomputed.parameters()
+        ):
+            self.assertTrue(torch.allclose(baseline_parameter.grad, recomputed_parameter.grad))
+
+        baseline_optimizer.step()
+        recomputed_optimizer.step()
+
+        for baseline_parameter, recomputed_parameter in zip(
+            baseline.parameters(), recomputed.parameters()
+        ):
+            self.assertTrue(torch.allclose(baseline_parameter, recomputed_parameter))
 
 
 if __name__ == "__main__":
