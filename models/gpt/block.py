@@ -11,7 +11,11 @@ class GPTBlock(nn.Module):
         super().__init__()
         self.attention_connection = SublayerConnection(
             config.d_model,
-            MaskedSelfAttention(config.d_model, config.n_heads),
+            MaskedSelfAttention(
+                config.d_model,
+                config.n_heads,
+                checkpoint_attention=config.activation_recomputation == "selective",
+            ),
             config.dropout,
         )
         self.ffn_connection = SublayerConnection(

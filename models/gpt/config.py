@@ -10,4 +10,4 @@ class GPTConfig:
     n_heads: int
     n_layers: int
     dropout: float = 0.1
-    activation_recomputation: bool = False
+    activation_recomputation: str = "none"

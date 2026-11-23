@@ -74,7 +74,7 @@ class GPTTest(unittest.TestCase):
             n_heads=4,
             n_layers=2,
             dropout=0.0,
-            activation_recomputation=True,
+            activation_recomputation="full",
         )
         recomputed = GPT(
             recomputed_config,
@@ -108,6 +108,50 @@ class GPTTest(unittest.TestCase):
             baseline.parameters(), recomputed.parameters()
         ):
             self.assertTrue(torch.allclose(baseline_parameter, recomputed_parameter))
+
+    def test_selective_checkpointing_matches_forward_and_gradients(self):
+        config = GPTConfig(
+            vocab_size=100,
+            max_seq_len=10,
+            d_model=16,
+            d_ff=32,
+            n_heads=4,
+            n_layers=2,
+            dropout=0.0,
+        )
+        selective_config = GPTConfig(
+            vocab_size=100,
+            max_seq_len=10,
+            d_model=16,
+            d_ff=32,
+            n_heads=4,
+            n_layers=2,
+            dropout=0.0,
+            activation_recomputation="selective",
+        )
+        baseline = GPT(config, Embedding(config.vocab_size, config.d_model))
+        selective = GPT(
+            selective_config,
+            Embedding(config.vocab_size, config.d_model),
+        )
+        selective.load_state_dict(baseline.state_dict())
+        token_ids = torch.randint(0, config.vocab_size, (2, 7))
+        targets = torch.randint(0, config.vocab_size, (2, 7))
+
+        baseline_loss = F.cross_entropy(
+            baseline(token_ids).reshape(-1, 100), targets.reshape(-1)
+        )
+        selective_loss = F.cross_entropy(
+            selective(token_ids).reshape(-1, 100), targets.reshape(-1)
+        )
+        baseline_loss.backward()
+        selective_loss.backward()
+
+        self.assertTrue(torch.allclose(baseline_loss, selective_loss))
+        for baseline_parameter, selective_parameter in zip(
+            baseline.parameters(), selective.parameters()
+        ):
+            self.assertTrue(torch.allclose(baseline_parameter.grad, selective_parameter.grad))
 
 
 if __name__ == "__main__":

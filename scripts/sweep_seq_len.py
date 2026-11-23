@@ -9,16 +9,16 @@ import sys
 SCRIPT = Path(__file__).with_name("train_gpt.py")
 
 
-def run_candidate(sequence_length: int, recomputation: bool) -> dict:
+def run_candidate(sequence_length: int, mode: str) -> dict:
     environment = os.environ.copy()
     environment.update(
         {
             "BENCHMARK": "1",
             "DEVICE": environment.get("DEVICE", "cuda"),
             "SEQ_LEN": str(sequence_length),
-            "WARMUP_STEPS": "0",
+            "WARMUP_STEPS": "1",
             "BENCHMARK_STEPS": "1",
-            "ACTIVATION_RECOMPUTATION": "1" if recomputation else "0",
+            "ACTIVATION_RECOMPUTATION": mode,
         }
     )
     result = subprocess.run(
@@ -41,15 +41,15 @@ def run_candidate(sequence_length: int, recomputation: bool) -> dict:
 
 
 def find_limit(
-    recomputation: bool,
+    mode: str,
     start: int,
     maximum: int,
     results: list[dict],
 ) -> tuple[int, int | None]:
-    label = "checkpointed" if recomputation else "baseline"
+    label = mode
 
     def test(sequence_length: int) -> bool:
-        result = run_candidate(sequence_length, recomputation)
+        result = run_candidate(sequence_length, mode)
         results.append({
             "mode": label,
             "seq_len": sequence_length,
@@ -88,18 +88,17 @@ def main() -> None:
 
     results = []
     limits = {}
-    for recomputation in (False, True):
-        label = "checkpointed" if recomputation else "baseline"
-        limits[label] = find_limit(recomputation, start, maximum, results)
+    for mode in ("none", "full", "selective"):
+        limits[mode] = find_limit(mode, start, maximum, results)
 
     output_path = Path(os.getenv("SWEEP_OUTPUT", "traces/seq_len_sweep.json"))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps({"results": results, "limits": limits}, indent=2) + "\n")
 
     print("\nLargest passing sequence length")
-    for label in ("baseline", "checkpointed"):
-        passing, failing = limits[label]
-        print(f"{label}: {passing}")
+    for mode in ("none", "full", "selective"):
+        passing, failing = limits[mode]
+        print(f"{mode}: {passing}")
     print(f"\nDetailed results: {output_path}")
 
 

@@ -44,13 +44,19 @@ class GPT(nn.Module):
         token_embeddings = self.embedding_dropout(token_embeddings)
 
         for block in self.blocks:
-            if self.config.activation_recomputation:
+            if self.config.activation_recomputation == "full":
                 token_embeddings = checkpoint(
                     block,
                     token_embeddings,
                     use_reentrant=False,
                 )
-            else:
+            elif self.config.activation_recomputation == "selective":
                 token_embeddings = block(token_embeddings)
+            elif self.config.activation_recomputation == "none":
+                token_embeddings = block(token_embeddings)
+            else:
+                raise ValueError(
+                    "activation_recomputation must be 'none', 'full', or 'selective'"
+                )
 
         return F.linear(token_embeddings, self.embedding.weight)
