@@ -18,7 +18,7 @@ def run_candidate(sequence_length: int, recomputation: bool) -> dict:
             "SEQ_LEN": str(sequence_length),
             "WARMUP_STEPS": "0",
             "BENCHMARK_STEPS": "1",
-            "ACTIVATION_RECOMPUTATION": "1" if recomputation else "0",
+            "ACTIVATION_RECOMPUTATION": "full" if recomputation else "none",
         }
     )
     result = subprocess.run(
