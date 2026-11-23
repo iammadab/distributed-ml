@@ -202,6 +202,20 @@ def _build_figure(profile: MemoryProfile, timing: StepTiming | None = None) -> g
             row=category_index,
             col=1,
         )
+        category_peak = profile.category_peaks[category]
+        figure.add_hline(
+            y=category_peak.bytes / divisor,
+            line_dash="dot",
+            line_color=CATEGORY_COLORS[category],
+            opacity=0.9,
+            annotation_text=(
+                f"peak {category_peak.bytes / divisor:.2f} {unit} "
+                f"@ {category_peak.time_ms:.0f} ms"
+            ),
+            annotation_position="top right",
+            row=category_index,
+            col=1,
+        )
 
     for phase in profile.phases:
         for row in range(1, row_count + 1):
