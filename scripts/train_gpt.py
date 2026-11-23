@@ -71,6 +71,7 @@ def main() -> None:
         d_ff=3_072,
         n_heads=12,
         n_layers=12,
+        activation_recomputation=os.getenv("ACTIVATION_RECOMPUTATION") == "1",
     )
     model = GPT(config, Embedding(config.vocab_size, config.d_model)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=2.5e-4)

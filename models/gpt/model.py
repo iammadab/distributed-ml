@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 from layers import Embedding, LearnedPositionalEmbedding
 
@@ -43,6 +44,13 @@ class GPT(nn.Module):
         token_embeddings = self.embedding_dropout(token_embeddings)
 
         for block in self.blocks:
-            token_embeddings = block(token_embeddings)
+            if self.config.activation_recomputation:
+                token_embeddings = checkpoint(
+                    block,
+                    token_embeddings,
+                    use_reentrant=False,
+                )
+            else:
+                token_embeddings = block(token_embeddings)
 
         return F.linear(token_embeddings, self.embedding.weight)
