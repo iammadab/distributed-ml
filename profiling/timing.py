@@ -85,8 +85,11 @@ def benchmark_training_step(
             )
         )
 
-    region_names = set(measurements[0].regions_ms)
-    if any(set(item.regions_ms) != region_names for item in measurements[1:]):
+    region_names = list(measurements[0].regions_ms)
+    if any(
+        set(item.regions_ms) != set(region_names)
+        for item in measurements[1:]
+    ):
         raise ValueError("step_fn must measure the same regions on every step")
 
     return StepTiming(
