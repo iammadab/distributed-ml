@@ -30,8 +30,19 @@ MODAL_GPU = "A100" if MODAL_GPU_COUNT == 1 else f"A100:{MODAL_GPU_COUNT}"
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("torch>=2.14.1")
-    .add_local_dir(REPOSITORY_ROOT, remote_path="/root/transformer-models")
+    .pip_install("torch>=2.14.1", "numpy>=2.5.4")
+    .add_local_dir(
+        REPOSITORY_ROOT / "models",
+        remote_path="/root/transformer-models/models",
+    )
+    .add_local_dir(
+        REPOSITORY_ROOT / "layers",
+        remote_path="/root/transformer-models/layers",
+    )
+    .add_local_file(
+        REPOSITORY_ROOT / "scripts" / "train_gpt_ddp.py",
+        remote_path="/root/transformer-models/scripts/train_gpt_ddp.py",
+    )
 )
 
 app = modal.App("transformer-models-ddp")
@@ -57,6 +68,8 @@ def configuration() -> tuple[int, int, dict[str, str]]:
 
 @app.function(gpu=MODAL_GPU, image=image, timeout=60 * 60)
 def run_training(gpu_count: int, process_count: int, training_variables: dict[str, str]) -> None:
+    import torch
+
     # invoke torch run on the node, spins up the required number of workers
     command = [
         sys.executable,
@@ -72,10 +85,10 @@ def run_training(gpu_count: int, process_count: int, training_variables: dict[st
     environment["DIST_BACKEND"] = "nccl"
 
     # Fail explicitly if Modal's allocation does not match the request.
-    visible_gpus = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
-    if len(visible_gpus) != gpu_count:
+    visible_gpu_count = torch.cuda.device_count()
+    if visible_gpu_count != gpu_count:
         raise RuntimeError(
-            f"Modal provided {len(visible_gpus)} visible GPUs, expected {gpu_count}"
+            f"Modal provided {visible_gpu_count} visible GPUs, expected {gpu_count}"
         )
 
     print(f"Running NCCL DDP on {gpu_count} A100 GPUs")
