@@ -180,9 +180,13 @@ def main() -> None:
                     device_ids=[local_rank] if device.type == "cuda" else None,
                 )
             optimizer = torch.optim.Adam(model.parameters(), lr=2.5e-4)
-            return lambda: observed_losses.append(
-                train_step(model, optimizer, token_ids, profiler)
-            )
+
+            def step():
+                loss = train_step(model, optimizer, token_ids, profiler)
+                observed_losses.append(loss)
+                return loss
+
+            return step
 
         result = profiler.run(
             step_factory=make_step,
@@ -200,9 +204,6 @@ def main() -> None:
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
             loss /= world_size
             dist.barrier()
-
-        if rank == 0 and os.getenv("REPORT_PROFILE", "1") == "1":
-            profiler.report()
 
         if rank == 0:
             print(f"Running on device: {device}")

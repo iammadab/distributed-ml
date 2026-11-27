@@ -21,6 +21,39 @@ class ProfileResult:
     step_result: object | None = None
 
 
+def report_profile(output_dir: Path) -> None:
+    """Report a completed local profile from its artifact directory."""
+    timing = None
+    timing_path = output_dir / "timing.json"
+    if timing_path.exists():
+        timing_data = json.loads(timing_path.read_text())
+        timing = StepTiming(
+            step_time_ms=timing_data["step_time_ms"],
+            regions_ms=timing_data["regions_ms"],
+        )
+
+    memory_path = output_dir / "gpt_memory.json"
+    timeline_path = output_dir / "gpt_memory_timeline.json"
+    if not memory_path.exists() or not timeline_path.exists():
+        if timing is not None:
+            _print_timing(timing)
+        return
+
+    profile = load_memory_profile(memory_path, timeline_path, device="cpu")
+    _print_timing(timing)
+    visualizer_path = output_dir / "memory.html"
+    write_memory_visualizer(profile, visualizer_path, timing=timing)
+    serve_visualizer(visualizer_path)
+
+
+def _print_timing(timing: StepTiming | None) -> None:
+    if timing is None:
+        return
+    print(f"step: {timing.step_time_ms:.2f} ms")
+    for name, duration_ms in timing.regions_ms.items():
+        print(f"{name}: {duration_ms:.2f} ms")
+
+
 class Profiler:
     """Coordinate named timing and PyTorch memory regions for one process."""
 
@@ -124,25 +157,13 @@ class Profiler:
         result = result or self._last_result
         if result is None:
             raise RuntimeError("run() must be called before report()")
-        if result.timing is not None:
-            print(f"step: {result.timing.step_time_ms:.2f} ms")
-            for name, duration_ms in result.timing.regions_ms.items():
-                print(f"{name}: {duration_ms:.2f} ms")
         if result.step_result is not None and isinstance(result.step_result, torch.Tensor):
             value = result.step_result.item() if result.step_result.numel() == 1 else result.step_result
             print(f"step result: {value}")
-        if result.memory is None:
-            return
-        profile = load_memory_profile(
-            result.memory.trace_path,
-            result.memory.memory_timeline_path,
-            device=result.memory.device,
-            peak_allocated_bytes=result.memory.peak_allocated_bytes,
-            peak_reserved_bytes=result.memory.peak_reserved_bytes,
-        )
-        visualizer_path = self.output_dir / "memory.html"
-        write_memory_visualizer(profile, visualizer_path, timing=result.timing)
-        serve_visualizer(visualizer_path)
+        if result.memory is not None:
+            report_profile(self.output_dir)
+        else:
+            _print_timing(result.timing)
 
     def benchmark(
         self,

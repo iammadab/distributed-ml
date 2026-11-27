@@ -8,6 +8,9 @@ import tarfile
 
 import modal
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from profiling import report_profile
+
 MAX_GPUS_PER_NODE = 8
 MODAL_INVOCATION = "MODAL_INVOCATION"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -33,24 +36,14 @@ def requested_gpu_count() -> int:
     return count
 
 
-def local_torchrun() -> str:
-    virtualenv_torchrun = REPOSITORY_ROOT / ".venv" / "bin" / "torchrun"
-    torchrun = (
-        str(virtualenv_torchrun)
-        if virtualenv_torchrun.exists()
-        else shutil.which("torchrun")
-    )
-    if torchrun is None:
-        raise RuntimeError("could not find torchrun in .venv/bin or PATH")
-    return torchrun
-
-
 def training_script() -> str:
     return str(Path(__file__).resolve().with_name("train_gpt_ddp.py"))
 
 def local_torchrun_command(processes: int) -> list[str]:
     return [
-        local_torchrun(),
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
         "--standalone",
         "--nproc_per_node",
         str(processes),
@@ -105,6 +98,8 @@ def launch_local_gloo() -> int:
         env=environment,
         check=False,
     )
+    if completed.returncode == 0:
+        report_profile(REPOSITORY_ROOT / "traces" / "rank-0")
     return completed.returncode
 
 def modal_command() -> list[str]:
@@ -169,7 +164,6 @@ def run_modal_training(
     environment = os.environ.copy()
     environment.update(variables)
     environment["DIST_BACKEND"] = "nccl"
-    environment["REPORT_PROFILE"] = "0"
 
     visible_gpu_count = torch.cuda.device_count()
     if visible_gpu_count != gpu_count:
@@ -200,6 +194,7 @@ def main() -> None:
             archive = run_modal_training.remote(gpu_count, process_count, variables)
             extract_trace_archive(archive, REPOSITORY_ROOT / "traces")
             print(f"Downloaded Modal traces to {REPOSITORY_ROOT / 'traces'}")
+            report_profile(REPOSITORY_ROOT / "traces" / "rank-0")
             return
         raise ValueError("DIST_BACKEND must be either 'gloo' or 'nccl'")
     except ValueError as error:
