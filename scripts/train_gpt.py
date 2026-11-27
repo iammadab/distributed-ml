@@ -99,19 +99,20 @@ def main() -> None:
         device,
         metadata={"batch_size": batch_size, "sequence_length": sequence_length},
     )
-    benchmark_model = model
-    benchmark_optimizer = optimizer
-    if profiler.capture_memory and profiler.benchmark_enabled:
-        benchmark_model = GPT(config, Embedding(config.vocab_size, config.d_model)).to(device)
-        benchmark_optimizer = torch.optim.Adam(benchmark_model.parameters(), lr=2.5e-4)
+
+    def make_step():
+        nonlocal model, optimizer
+        torch.manual_seed(0)
+        model = GPT(config, Embedding(config.vocab_size, config.d_model)).to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=2.5e-4)
+        return lambda: train_step(model, optimizer, token_ids, profiler)
+
     result = profiler.run(
-        memory_step=lambda: train_step(model, optimizer, token_ids, profiler),
-        benchmark_step=lambda: train_step(
-            benchmark_model, benchmark_optimizer, token_ids, profiler
-        ),
-            warmup_steps=int(os.getenv("WARMUP_STEPS", "1")),
-            measured_steps=int(os.getenv("BENCHMARK_STEPS", "3")),
+        step_factory=make_step,
+        warmup_steps=int(os.getenv("WARMUP_STEPS", "1")),
+        measured_steps=int(os.getenv("BENCHMARK_STEPS", "3")),
     )
+
     if result.timing is not None:
         print(f"step: {result.timing.step_time_ms:.2f} ms")
         for region, duration_ms in result.timing.regions_ms.items():
@@ -128,8 +129,9 @@ def main() -> None:
         visualizer_path = Path("traces/gpt_memory.html")
         write_memory_visualizer(profile, visualizer_path, timing=result.timing)
         serve_visualizer(visualizer_path)
+
     elif result.timing is None:
-        loss = train_step(model, optimizer, token_ids, profiler)
+        loss = make_step()()
         print(f"step 0: loss: {loss.item():.4f}")
 
 

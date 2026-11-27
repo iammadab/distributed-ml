@@ -164,16 +164,29 @@ def main() -> None:
                 "activation_recomputation": config.activation_recomputation,
             },
         )
-        result = profiler.run(
-            memory_step=lambda: observed_losses.append(
+
+        def make_step():
+            nonlocal model, optimizer
+            torch.manual_seed(0)
+            if device.type == "cuda":
+                torch.cuda.manual_seed(0)
+            model = GPT(config, Embedding(config.vocab_size, config.d_model)).to(device)
+            if is_distributed:
+                model = DistributedDataParallel(
+                    model,
+                    device_ids=[local_rank] if device.type == "cuda" else None,
+                )
+            optimizer = torch.optim.Adam(model.parameters(), lr=2.5e-4)
+            return lambda: observed_losses.append(
                 train_step(model, optimizer, token_ids, profiler)
-            ),
+            )
+
+        result = profiler.run(
+            step_factory=make_step,
             warmup_steps=int(os.getenv("WARMUP_STEPS", "1")),
             measured_steps=int(os.getenv("BENCHMARK_STEPS", "3")),
         )
-        loss = observed_losses[-1] if observed_losses else train_step(
-            model, optimizer, token_ids, profiler
-        )
+        loss = observed_losses[-1] if observed_losses else make_step()()
 
         if is_distributed:
             # Note: this is only for reporting

@@ -81,21 +81,24 @@ class Profiler:
 
     def run(
         self,
-        memory_step: Callable[[], object],
-        benchmark_step: Callable[[], object] | None = None,
+        step_factory: Callable[[], Callable[[], object]],
         warmup_steps: int = 1,
         measured_steps: int = 3,
     ) -> ProfileResult:
-        """Run the enabled captures; all callbacks are no-ops when disabled."""
+        """Run enabled captures, rebuilding the step for each capture."""
         if not self.capture_memory and not self.benchmark_enabled:
             return ProfileResult()
 
         self.write_metadata()
-        memory = self.profile_memory(memory_step) if self.capture_memory else None
+        memory = (
+            self.profile_memory(step_factory())
+            if self.capture_memory
+            else None
+        )
         timing = None
         if self.benchmark_enabled:
             timing = self.benchmark(
-                benchmark_step or memory_step,
+                step_factory(),
                 warmup_steps=warmup_steps,
                 measured_steps=measured_steps,
             )
