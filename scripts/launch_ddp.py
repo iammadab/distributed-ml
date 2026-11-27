@@ -6,11 +6,9 @@ import sys
 
 import modal
 
-
 MAX_GPUS_PER_NODE = 8
 MODAL_INVOCATION = "MODAL_INVOCATION"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-
 
 def positive_integer(name: str, default: int) -> int:
     value = os.getenv(name, str(default))
@@ -48,7 +46,6 @@ def local_torchrun() -> str:
 def training_script() -> str:
     return str(Path(__file__).resolve().with_name("train_gpt_ddp.py"))
 
-
 def local_torchrun_command(processes: int) -> list[str]:
     return [
         local_torchrun(),
@@ -58,14 +55,12 @@ def local_torchrun_command(processes: int) -> list[str]:
         training_script(),
     ]
 
-
 def training_variables() -> dict[str, str]:
     return {
         name: os.environ[name]
         for name in ("BATCH_SIZE", "SEQ_LEN", "ACTIVATION_RECOMPUTATION")
         if name in os.environ
     }
-
 
 def configuration() -> tuple[int, int, dict[str, str]]:
     gpu_count = requested_gpu_count()
@@ -75,7 +70,6 @@ def configuration() -> tuple[int, int, dict[str, str]]:
             "NPROC_PER_NODE cannot exceed GPU_COUNT for the single-node launcher"
         )
     return gpu_count, process_count, training_variables()
-
 
 def launch_local_gloo() -> int:
     process_count = positive_integer("NPROC_PER_NODE", 1)
@@ -88,13 +82,11 @@ def launch_local_gloo() -> int:
     )
     return completed.returncode
 
-
 def modal_command() -> list[str]:
     modal_executable = shutil.which("modal")
     if modal_executable is None:
         raise RuntimeError("could not find modal in PATH")
     return [modal_executable, "run", str(Path(__file__).resolve())]
-
 
 def launch_modal() -> int:
     environment = os.environ.copy()
@@ -105,7 +97,6 @@ def launch_modal() -> int:
         check=False,
     )
     return completed.returncode
-
 
 MODAL_GPU_COUNT = requested_gpu_count()
 MODAL_GPU = "A100" if MODAL_GPU_COUNT == 1 else f"A100:{MODAL_GPU_COUNT}"
@@ -128,7 +119,6 @@ image = (
 )
 
 app = modal.App("transformer-models-ddp")
-
 
 @app.function(gpu=MODAL_GPU, image=image, timeout=60 * 60)
 def run_modal_training(
@@ -166,7 +156,6 @@ def run_modal_training(
         check=True,
     )
 
-
 @app.local_entrypoint()
 def main() -> None:
     backend = os.getenv("DIST_BACKEND", "gloo").lower()
@@ -176,7 +165,6 @@ def main() -> None:
         if backend == "nccl":
             if os.getenv(MODAL_INVOCATION) != "1":
                 sys.exit(launch_modal())
-
             gpu_count, process_count, variables = configuration()
             run_modal_training.remote(gpu_count, process_count, variables)
             return
