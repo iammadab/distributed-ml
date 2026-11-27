@@ -5,30 +5,30 @@ from pathlib import Path
 
 import torch
 
-from scripts.train_gpt_ddp import rank_trace_directory, write_profile_metadata
+from profiling import ProcessInfo, Profiler
 
 
 class DDPProfilingTest(unittest.TestCase):
     def test_rank_trace_directory_is_rank_scoped(self):
-        self.assertEqual(rank_trace_directory(0), Path("traces/rank-0"))
-        self.assertEqual(rank_trace_directory(3), Path("traces/rank-3"))
+        profiler = Profiler(Path("traces"), torch.device("cpu"), ProcessInfo(rank=3))
+        self.assertEqual(profiler.output_dir, Path("traces/rank-3"))
 
     def test_profile_metadata_contains_rank_configuration(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
-            output_dir = Path(temporary_directory) / "rank-1"
-            write_profile_metadata(
+            output_dir = Path(temporary_directory)
+            profiler = Profiler(
                 output_dir,
-                rank=1,
-                local_rank=0,
-                world_size=2,
-                backend="gloo",
-                device=torch.device("cpu"),
-                batch_size=2,
-                sequence_length=128,
-                activation_recomputation="full",
+                torch.device("cpu"),
+                ProcessInfo(rank=1, local_rank=0, world_size=2, backend="gloo"),
+                metadata={
+                    "batch_size": 2,
+                    "sequence_length": 128,
+                    "activation_recomputation": "full",
+                },
             )
+            profiler.write_metadata()
 
-            metadata = json.loads((output_dir / "metadata.json").read_text())
+            metadata = json.loads((profiler.output_dir / "metadata.json").read_text())
 
         self.assertEqual(metadata["rank"], 1)
         self.assertEqual(metadata["local_rank"], 0)

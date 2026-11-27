@@ -3,6 +3,7 @@ from .memory_data import MemoryPeak, MemoryPoint, MemoryProfile, Phase, load_mem
 from .server import serve_visualizer
 from .visualizer import write_memory_visualizer
 from .timing import StepTiming, Timer, benchmark_training_step, timed_region, write_timing
+from .session import ProcessInfo, Profiler
 
 __all__ = [
     "MemoryPoint",
@@ -19,4 +20,6 @@ __all__ = [
     "benchmark_training_step",
     "timed_region",
     "write_timing",
+    "ProcessInfo",
+    "Profiler",
 ]

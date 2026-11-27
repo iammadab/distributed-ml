@@ -1,7 +1,7 @@
 from pathlib import Path
+from contextlib import nullcontext
 import os
 import sys
-import json
 
 import torch
 import torch.distributed as dist
@@ -14,10 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from layers import Embedding
 from models.gpt import GPT, GPTConfig
 from profiling import (
-    benchmark_training_step,
-    collect_memory_profile,
-    timed_region,
-    write_timing,
+    ProcessInfo,
+    Profiler,
 )
 
 VOCAB_SIZE = 40_478
@@ -72,53 +70,24 @@ def train_step(
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     token_ids: torch.Tensor,
-    timer=None,
+    profiler: Profiler | None = None,
 ) -> torch.Tensor:
     inputs = token_ids[:, :-1]
     targets = token_ids[:, 1:]
 
     optimizer.zero_grad()
-    with torch.profiler.record_function("forward"), timed_region(timer, "forward"):
+    with profiler.region("forward") if profiler is not None else nullcontext():
         logits = model(inputs)
-    with torch.profiler.record_function("loss"), timed_region(timer, "loss"):
+    with profiler.region("loss") if profiler is not None else nullcontext():
         loss = F.cross_entropy(
             logits.reshape(-1, logits.size(-1)),
             targets.reshape(-1),
         )
-    with torch.profiler.record_function("backward"), timed_region(timer, "backward"):
+    with profiler.region("backward") if profiler is not None else nullcontext():
         loss.backward()
-    with torch.profiler.record_function("optimizer_step"), timed_region(timer, "optimizer_step"):
+    with profiler.region("optimizer_step") if profiler is not None else nullcontext():
         optimizer.step()
     return loss.detach()
-
-
-def rank_trace_directory(rank: int) -> Path:
-    return Path("traces") / f"rank-{rank}"
-
-
-def write_profile_metadata(
-    output_dir: Path,
-    *,
-    rank: int,
-    local_rank: int,
-    world_size: int,
-    backend: str,
-    device: torch.device,
-    batch_size: int,
-    sequence_length: int,
-    activation_recomputation: str,
-) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "metadata.json").write_text(json.dumps({
-        "rank": rank,
-        "local_rank": local_rank,
-        "world_size": world_size,
-        "backend": backend,
-        "device": str(device),
-        "batch_size": batch_size,
-        "sequence_length": sequence_length,
-        "activation_recomputation": activation_recomputation,
-    }, indent=2) + "\n")
 
 
 def main() -> None:
@@ -179,49 +148,41 @@ def main() -> None:
 
         profile_requested = os.getenv("PROFILE_MEMORY") == "1"
         benchmark_requested = os.getenv("BENCHMARK") == "1"
-        output_dir = rank_trace_directory(rank)
         observed_losses: list[torch.Tensor] = []
+        def synchronize() -> None:
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            if is_distributed:
+                dist.barrier()
+
+        profiler = Profiler(
+            output_dir=Path("traces"),
+            device=device,
+            process=ProcessInfo(rank, local_rank, world_size, backend),
+            synchronize=synchronize,
+            metadata={
+                "batch_size": batch_size,
+                "sequence_length": sequence_length,
+                "activation_recomputation": config.activation_recomputation,
+            },
+        )
         if profile_requested or benchmark_requested:
-            write_profile_metadata(
-                output_dir,
-                rank=rank,
-                local_rank=local_rank,
-                world_size=world_size,
-                backend=backend,
-                device=device,
-                batch_size=batch_size,
-                sequence_length=sequence_length,
-                activation_recomputation=config.activation_recomputation,
-            )
+            profiler.write_metadata()
 
         if profile_requested:
-            if is_distributed:
-                dist.barrier()
-            collect_memory_profile(
-                step_fn=lambda: observed_losses.append(
-                    train_step(model, optimizer, token_ids)
-                ),
-                output_dir=output_dir,
-                device=device,
+            profiler.profile_memory(
+                lambda: observed_losses.append(train_step(model, optimizer, token_ids, profiler))
             )
-            if is_distributed:
-                dist.barrier()
 
         timing = None
         if benchmark_requested:
-            if is_distributed:
-                dist.barrier()
-            timing = benchmark_training_step(
-                step_fn=lambda timer: observed_losses.append(
-                    train_step(model, optimizer, token_ids, timer)
+            timing = profiler.benchmark(
+                step_fn=lambda: observed_losses.append(
+                    train_step(model, optimizer, token_ids, profiler)
                 ),
-                device=device,
                 warmup_steps=int(os.getenv("WARMUP_STEPS", "1")),
                 measured_steps=int(os.getenv("BENCHMARK_STEPS", "3")),
             )
-            write_timing(timing, output_dir / "timing.json")
-            if is_distributed:
-                dist.barrier()
 
         if not profile_requested and not benchmark_requested:
             loss = train_step(model, optimizer, token_ids)
