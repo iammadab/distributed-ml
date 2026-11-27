@@ -92,7 +92,7 @@ def main() -> None:
     ).to(device)
 
     profiler = Profiler.from_environment(
-        Path("traces/rank-0"),
+        Path("traces"),
         device,
         metadata={"batch_size": batch_size, "sequence_length": sequence_length},
     )
