@@ -92,7 +92,7 @@ def main() -> None:
     ).to(device)
 
     profiler = Profiler.from_environment(
-        Path("traces"),
+        Path("traces/rank-0"),
         device,
         metadata={"batch_size": batch_size, "sequence_length": sequence_length},
     )
@@ -109,11 +109,7 @@ def main() -> None:
         warmup_steps=int(os.getenv("WARMUP_STEPS", "1")),
         measured_steps=int(os.getenv("BENCHMARK_STEPS", "3")),
     )
-
-    if result.timing is None and result.memory is None:
-        loss = make_step()()
-        print(f"step 0: loss: {loss.item():.4f}")
-
+    profiler.report()
 
 if __name__ == "__main__":
     main()

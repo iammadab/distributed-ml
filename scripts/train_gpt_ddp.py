@@ -14,7 +14,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from layers import Embedding
 from models.gpt import GPT, GPTConfig
 from profiling import (
-    ProcessInfo,
     Profiler,
 )
 
@@ -154,11 +153,14 @@ def main() -> None:
                 dist.barrier()
 
         profiler = Profiler.from_environment(
-            output_dir=Path("traces"),
+            output_dir=Path("traces") / f"rank-{rank}",
             device=device,
-            process=ProcessInfo(rank, local_rank, world_size, backend),
             synchronize=synchronize,
             metadata={
+                "rank": rank,
+                "local_rank": local_rank,
+                "world_size": world_size,
+                "backend": backend,
                 "batch_size": batch_size,
                 "sequence_length": sequence_length,
                 "activation_recomputation": config.activation_recomputation,
@@ -185,9 +187,10 @@ def main() -> None:
             step_factory=make_step,
             warmup_steps=int(os.getenv("WARMUP_STEPS", "1")),
             measured_steps=int(os.getenv("BENCHMARK_STEPS", "3")),
-            report=False,
         )
-        loss = observed_losses[-1] if observed_losses else make_step()()
+        loss = result.step_result
+        if loss is None:
+            raise RuntimeError("profiler did not execute a training step")
 
         if is_distributed:
             # Note: this is only for reporting
@@ -197,8 +200,8 @@ def main() -> None:
             loss /= world_size
             dist.barrier()
 
-        if profiler.show_results:
-            profiler.show(result)
+        if rank == 0:
+            profiler.report()
 
         if rank == 0:
             print(f"Running on device: {device}")

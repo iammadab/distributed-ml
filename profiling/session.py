@@ -1,5 +1,5 @@
 from contextlib import ExitStack, nullcontext
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 import json
 from pathlib import Path
 from typing import Callable
@@ -15,17 +15,10 @@ from .visualizer import write_memory_visualizer
 
 
 @dataclass(frozen=True)
-class ProcessInfo:
-    rank: int = 0
-    local_rank: int = 0
-    world_size: int = 1
-    backend: str | None = None
-
-
-@dataclass(frozen=True)
 class ProfileResult:
     memory: ProfileArtifacts | None = None
     timing: StepTiming | None = None
+    step_result: object | None = None
 
 
 class Profiler:
@@ -35,23 +28,20 @@ class Profiler:
         self,
         output_dir: Path,
         device: torch.device,
-        process: ProcessInfo = ProcessInfo(),
         synchronize: Callable[[], None] | None = None,
         metadata: dict[str, object] | None = None,
         capture_memory: bool = False,
         benchmark_enabled: bool = False,
-        show_results: bool = True,
     ) -> None:
-        self.output_dir = output_dir / f"rank-{process.rank}"
+        self.output_dir = output_dir
         self.device = device
-        self.process = process
         self._synchronize = synchronize
         self._timer: Timer | None = None
         self._record_regions = False
         self._metadata = metadata or {}
         self.capture_memory = capture_memory
         self.benchmark_enabled = benchmark_enabled
-        self.show_results = show_results
+        self._last_result: ProfileResult | None = None
 
     @classmethod
     def from_environment(cls, *args, **kwargs):
@@ -89,38 +79,58 @@ class Profiler:
         step_factory: Callable[[], Callable[[], object]],
         warmup_steps: int = 1,
         measured_steps: int = 3,
-        report: bool = True,
     ) -> ProfileResult:
         """Run enabled captures, rebuilding the step for each capture."""
         if not self.capture_memory and not self.benchmark_enabled:
-            return ProfileResult()
+            result = ProfileResult(step_result=step_factory()())
+            self._last_result = result
+            return result
 
         self.write_metadata()
+        observed_results: list[object] = []
+
+        def observed_step_factory():
+            step = step_factory()
+
+            def observed_step():
+                result = step()
+                observed_results.append(result)
+                return result
+
+            return observed_step
+
         memory = (
-            self.profile_memory(step_factory())
+            self.profile_memory(observed_step_factory())
             if self.capture_memory
             else None
         )
         timing = None
         if self.benchmark_enabled:
             timing = self.benchmark(
-                step_factory(),
+                observed_step_factory(),
                 warmup_steps=warmup_steps,
                 measured_steps=measured_steps,
             )
-        result = ProfileResult(memory=memory, timing=timing)
-        if report and self.show_results:
-            self.show(result)
+        result = ProfileResult(
+            memory=memory,
+            timing=timing,
+            step_result=observed_results[-1] if observed_results else None,
+        )
+        self._last_result = result
         return result
 
-    def show(self, result: ProfileResult) -> None:
-        """Print and display results from rank zero only."""
-        if self.process.rank != 0:
-            return
+    def report(self, result: ProfileResult | None = None) -> None:
+        """Print and display the latest local profiling result."""
+        result = result or self._last_result
+        if result is None:
+            raise RuntimeError("run() must be called before report()")
         if result.timing is not None:
             print(f"step: {result.timing.step_time_ms:.2f} ms")
             for name, duration_ms in result.timing.regions_ms.items():
                 print(f"{name}: {duration_ms:.2f} ms")
+        if result.step_result is not None and isinstance(result.step_result, torch.Tensor):
+            value = result.step_result.item() if result.step_result.numel() == 1 else result.step_result
+            print(f"step result: {value}")
         if result.memory is None:
             return
         profile = load_memory_profile(
@@ -166,7 +176,6 @@ class Profiler:
     def write_metadata(self, **extra: object) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         metadata = {
-            **asdict(self.process),
             "device": str(self.device),
             **self._metadata,
             **extra,

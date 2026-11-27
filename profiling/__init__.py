@@ -2,7 +2,7 @@ from .collect import ProfileArtifacts
 from .memory_data import MemoryPeak, MemoryPoint, MemoryProfile, Phase, load_memory_profile
 from .server import serve_visualizer
 from .visualizer import write_memory_visualizer
-from .session import ProcessInfo, ProfileResult, Profiler
+from .session import ProfileResult, Profiler
 
 __all__ = [
     "MemoryPoint",
@@ -13,7 +13,6 @@ __all__ = [
     "load_memory_profile",
     "serve_visualizer",
     "write_memory_visualizer",
-    "ProcessInfo",
     "ProfileResult",
     "Profiler",
 ]

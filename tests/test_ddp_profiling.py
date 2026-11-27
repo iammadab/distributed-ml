@@ -5,12 +5,12 @@ from pathlib import Path
 
 import torch
 
-from profiling import ProcessInfo, Profiler
+from profiling import Profiler
 
 
 class DDPProfilingTest(unittest.TestCase):
     def test_rank_trace_directory_is_rank_scoped(self):
-        profiler = Profiler(Path("traces"), torch.device("cpu"), ProcessInfo(rank=3))
+        profiler = Profiler(Path("traces/rank-3"), torch.device("cpu"))
         self.assertEqual(profiler.output_dir, Path("traces/rank-3"))
 
     def test_profile_metadata_contains_rank_configuration(self):
@@ -19,8 +19,11 @@ class DDPProfilingTest(unittest.TestCase):
             profiler = Profiler(
                 output_dir,
                 torch.device("cpu"),
-                ProcessInfo(rank=1, local_rank=0, world_size=2, backend="gloo"),
                 metadata={
+                    "rank": 1,
+                    "local_rank": 0,
+                    "world_size": 2,
+                    "backend": "gloo",
                     "batch_size": 2,
                     "sequence_length": 128,
                     "activation_recomputation": "full",
