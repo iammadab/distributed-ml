@@ -12,9 +12,6 @@ from layers import Embedding
 from models.gpt import GPT, GPTConfig
 from profiling import (
     Profiler,
-    load_memory_profile,
-    serve_visualizer,
-    write_memory_visualizer,
 )
 
 
@@ -113,24 +110,7 @@ def main() -> None:
         measured_steps=int(os.getenv("BENCHMARK_STEPS", "3")),
     )
 
-    if result.timing is not None:
-        print(f"step: {result.timing.step_time_ms:.2f} ms")
-        for region, duration_ms in result.timing.regions_ms.items():
-            print(f"{region}: {duration_ms:.2f} ms")
-
-    if result.memory is not None:
-        profile = load_memory_profile(
-            result.memory.trace_path,
-            result.memory.memory_timeline_path,
-            device=result.memory.device,
-            peak_allocated_bytes=result.memory.peak_allocated_bytes,
-            peak_reserved_bytes=result.memory.peak_reserved_bytes,
-        )
-        visualizer_path = Path("traces/gpt_memory.html")
-        write_memory_visualizer(profile, visualizer_path, timing=result.timing)
-        serve_visualizer(visualizer_path)
-
-    elif result.timing is None:
+    if result.timing is None and result.memory is None:
         loss = make_step()()
         print(f"step 0: loss: {loss.item():.4f}")
 

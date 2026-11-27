@@ -185,6 +185,7 @@ def main() -> None:
             step_factory=make_step,
             warmup_steps=int(os.getenv("WARMUP_STEPS", "1")),
             measured_steps=int(os.getenv("BENCHMARK_STEPS", "3")),
+            report=False,
         )
         loss = observed_losses[-1] if observed_losses else make_step()()
 
@@ -195,6 +196,9 @@ def main() -> None:
             dist.all_reduce(loss, op=dist.ReduceOp.SUM)
             loss /= world_size
             dist.barrier()
+
+        if profiler.show_results:
+            profiler.show(result)
 
         if rank == 0:
             print(f"Running on device: {device}")

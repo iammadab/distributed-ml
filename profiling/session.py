@@ -8,7 +8,10 @@ import os
 import torch
 
 from .collect import ProfileArtifacts, collect_memory_profile
+from .memory_data import load_memory_profile
+from .server import serve_visualizer
 from .timing import StepTiming, Timer, benchmark_training_step, timed_region, write_timing
+from .visualizer import write_memory_visualizer
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,7 @@ class Profiler:
         metadata: dict[str, object] | None = None,
         capture_memory: bool = False,
         benchmark_enabled: bool = False,
+        show_results: bool = True,
     ) -> None:
         self.output_dir = output_dir / f"rank-{process.rank}"
         self.device = device
@@ -47,6 +51,7 @@ class Profiler:
         self._metadata = metadata or {}
         self.capture_memory = capture_memory
         self.benchmark_enabled = benchmark_enabled
+        self.show_results = show_results
 
     @classmethod
     def from_environment(cls, *args, **kwargs):
@@ -84,6 +89,7 @@ class Profiler:
         step_factory: Callable[[], Callable[[], object]],
         warmup_steps: int = 1,
         measured_steps: int = 3,
+        report: bool = True,
     ) -> ProfileResult:
         """Run enabled captures, rebuilding the step for each capture."""
         if not self.capture_memory and not self.benchmark_enabled:
@@ -102,7 +108,31 @@ class Profiler:
                 warmup_steps=warmup_steps,
                 measured_steps=measured_steps,
             )
-        return ProfileResult(memory=memory, timing=timing)
+        result = ProfileResult(memory=memory, timing=timing)
+        if report and self.show_results:
+            self.show(result)
+        return result
+
+    def show(self, result: ProfileResult) -> None:
+        """Print and display results from rank zero only."""
+        if self.process.rank != 0:
+            return
+        if result.timing is not None:
+            print(f"step: {result.timing.step_time_ms:.2f} ms")
+            for name, duration_ms in result.timing.regions_ms.items():
+                print(f"{name}: {duration_ms:.2f} ms")
+        if result.memory is None:
+            return
+        profile = load_memory_profile(
+            result.memory.trace_path,
+            result.memory.memory_timeline_path,
+            device=result.memory.device,
+            peak_allocated_bytes=result.memory.peak_allocated_bytes,
+            peak_reserved_bytes=result.memory.peak_reserved_bytes,
+        )
+        visualizer_path = self.output_dir / "memory.html"
+        write_memory_visualizer(profile, visualizer_path, timing=result.timing)
+        serve_visualizer(visualizer_path)
 
     def benchmark(
         self,
