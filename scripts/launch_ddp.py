@@ -106,19 +106,19 @@ image = (
     .pip_install("torch>=2.14.1", "numpy>=2.5.4")
     .add_local_dir(
         REPOSITORY_ROOT / "models",
-        remote_path="/root/transformer-models/models",
+        remote_path="/root/distributed-ml/models",
     )
     .add_local_dir(
         REPOSITORY_ROOT / "layers",
-        remote_path="/root/transformer-models/layers",
+        remote_path="/root/distributed-ml/layers",
     )
     .add_local_file(
         REPOSITORY_ROOT / "scripts" / "train_gpt_ddp.py",
-        remote_path="/root/transformer-models/scripts/train_gpt_ddp.py",
+        remote_path="/root/distributed-ml/scripts/train_gpt_ddp.py",
     )
 )
 
-app = modal.App("transformer-models-ddp")
+app = modal.App("distributed-ml-ddp")
 
 @app.function(gpu=MODAL_GPU, image=image, timeout=60 * 60)
 def run_modal_training(
@@ -135,7 +135,7 @@ def run_modal_training(
         "--standalone",
         "--nproc_per_node",
         str(process_count),
-        "/root/transformer-models/scripts/train_gpt_ddp.py",
+        "/root/distributed-ml/scripts/train_gpt_ddp.py",
     ]
     environment = os.environ.copy()
     environment.update(variables)
@@ -151,7 +151,7 @@ def run_modal_training(
     print(f"Processes per node: {process_count}")
     subprocess.run(
         command,
-        cwd="/root/transformer-models",
+        cwd="/root/distributed-ml",
         env=environment,
         check=True,
     )
