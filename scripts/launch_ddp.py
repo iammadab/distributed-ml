@@ -1,8 +1,10 @@
 from pathlib import Path
+import io
 import os
 import shutil
 import subprocess
 import sys
+import tarfile
 
 import modal
 
@@ -58,9 +60,32 @@ def local_torchrun_command(processes: int) -> list[str]:
 def training_variables() -> dict[str, str]:
     return {
         name: os.environ[name]
-        for name in ("BATCH_SIZE", "SEQ_LEN", "ACTIVATION_RECOMPUTATION")
+        for name in (
+            "BATCH_SIZE",
+            "SEQ_LEN",
+            "ACTIVATION_RECOMPUTATION",
+            "PROFILE_MEMORY",
+            "BENCHMARK",
+            "WARMUP_STEPS",
+            "BENCHMARK_STEPS",
+        )
         if name in os.environ
     }
+
+
+def create_trace_archive(trace_dir: Path) -> bytes:
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w:gz") as tar:
+        for path in trace_dir.rglob("*"):
+            if path.is_file():
+                tar.add(path, arcname=path.relative_to(trace_dir))
+    return archive.getvalue()
+
+
+def extract_trace_archive(archive: bytes, trace_dir: Path) -> None:
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+        tar.extractall(trace_dir)
 
 def configuration() -> tuple[int, int, dict[str, str]]:
     gpu_count = requested_gpu_count()
@@ -112,6 +137,10 @@ image = (
         REPOSITORY_ROOT / "layers",
         remote_path="/root/distributed-ml/layers",
     )
+    .add_local_dir(
+        REPOSITORY_ROOT / "profiling",
+        remote_path="/root/distributed-ml/profiling",
+    )
     .add_local_file(
         REPOSITORY_ROOT / "scripts" / "train_gpt_ddp.py",
         remote_path="/root/distributed-ml/scripts/train_gpt_ddp.py",
@@ -125,7 +154,7 @@ def run_modal_training(
     gpu_count: int,
     process_count: int,
     variables: dict[str, str],
-) -> None:
+) -> bytes:
     import torch
 
     command = [
@@ -140,6 +169,7 @@ def run_modal_training(
     environment = os.environ.copy()
     environment.update(variables)
     environment["DIST_BACKEND"] = "nccl"
+    environment["REPORT_PROFILE"] = "0"
 
     visible_gpu_count = torch.cuda.device_count()
     if visible_gpu_count != gpu_count:
@@ -155,6 +185,7 @@ def run_modal_training(
         env=environment,
         check=True,
     )
+    return create_trace_archive(Path("/root/distributed-ml/traces"))
 
 @app.local_entrypoint()
 def main() -> None:
@@ -166,7 +197,9 @@ def main() -> None:
             if os.getenv(MODAL_INVOCATION) != "1":
                 sys.exit(launch_modal())
             gpu_count, process_count, variables = configuration()
-            run_modal_training.remote(gpu_count, process_count, variables)
+            archive = run_modal_training.remote(gpu_count, process_count, variables)
+            extract_trace_archive(archive, REPOSITORY_ROOT / "traces")
+            print(f"Downloaded Modal traces to {REPOSITORY_ROOT / 'traces'}")
             return
         raise ValueError("DIST_BACKEND must be either 'gloo' or 'nccl'")
     except ValueError as error:

@@ -146,6 +146,7 @@ def main() -> None:
         )
 
         observed_losses: list[torch.Tensor] = []
+
         def synchronize() -> None:
             if device.type == "cuda":
                 torch.cuda.synchronize(device)
@@ -200,7 +201,7 @@ def main() -> None:
             loss /= world_size
             dist.barrier()
 
-        if rank == 0:
+        if rank == 0 and os.getenv("REPORT_PROFILE", "1") == "1":
             profiler.report()
 
         if rank == 0:
