@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
 from typing import Callable
+import os
 
 import torch
 
@@ -18,6 +19,12 @@ class ProcessInfo:
     backend: str | None = None
 
 
+@dataclass(frozen=True)
+class ProfileResult:
+    memory: ProfileArtifacts | None = None
+    timing: StepTiming | None = None
+
+
 class Profiler:
     """Coordinate named timing and PyTorch memory regions for one process."""
 
@@ -28,6 +35,8 @@ class Profiler:
         process: ProcessInfo = ProcessInfo(),
         synchronize: Callable[[], None] | None = None,
         metadata: dict[str, object] | None = None,
+        capture_memory: bool = False,
+        benchmark_enabled: bool = False,
     ) -> None:
         self.output_dir = output_dir / f"rank-{process.rank}"
         self.device = device
@@ -36,6 +45,17 @@ class Profiler:
         self._timer: Timer | None = None
         self._record_regions = False
         self._metadata = metadata or {}
+        self.capture_memory = capture_memory
+        self.benchmark_enabled = benchmark_enabled
+
+    @classmethod
+    def from_environment(cls, *args, **kwargs):
+        return cls(
+            *args,
+            capture_memory=os.getenv("PROFILE_MEMORY") == "1",
+            benchmark_enabled=os.getenv("BENCHMARK") == "1",
+            **kwargs,
+        )
 
     def region(self, name: str):
         """Name one region in both timing output and PyTorch profiler traces."""
@@ -58,6 +78,28 @@ class Profiler:
         finally:
             self._record_regions = False
             self._synchronize_processes()
+
+    def run(
+        self,
+        memory_step: Callable[[], object],
+        benchmark_step: Callable[[], object] | None = None,
+        warmup_steps: int = 1,
+        measured_steps: int = 3,
+    ) -> ProfileResult:
+        """Run the enabled captures; all callbacks are no-ops when disabled."""
+        if not self.capture_memory and not self.benchmark_enabled:
+            return ProfileResult()
+
+        self.write_metadata()
+        memory = self.profile_memory(memory_step) if self.capture_memory else None
+        timing = None
+        if self.benchmark_enabled:
+            timing = self.benchmark(
+                benchmark_step or memory_step,
+                warmup_steps=warmup_steps,
+                measured_steps=measured_steps,
+            )
+        return ProfileResult(memory=memory, timing=timing)
 
     def benchmark(
         self,

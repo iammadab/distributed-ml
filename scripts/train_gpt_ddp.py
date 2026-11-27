@@ -146,8 +146,6 @@ def main() -> None:
             device=device,
         )
 
-        profile_requested = os.getenv("PROFILE_MEMORY") == "1"
-        benchmark_requested = os.getenv("BENCHMARK") == "1"
         observed_losses: list[torch.Tensor] = []
         def synchronize() -> None:
             if device.type == "cuda":
@@ -155,7 +153,7 @@ def main() -> None:
             if is_distributed:
                 dist.barrier()
 
-        profiler = Profiler(
+        profiler = Profiler.from_environment(
             output_dir=Path("traces"),
             device=device,
             process=ProcessInfo(rank, local_rank, world_size, backend),
@@ -166,28 +164,16 @@ def main() -> None:
                 "activation_recomputation": config.activation_recomputation,
             },
         )
-        if profile_requested or benchmark_requested:
-            profiler.write_metadata()
-
-        if profile_requested:
-            profiler.profile_memory(
-                lambda: observed_losses.append(train_step(model, optimizer, token_ids, profiler))
-            )
-
-        timing = None
-        if benchmark_requested:
-            timing = profiler.benchmark(
-                step_fn=lambda: observed_losses.append(
-                    train_step(model, optimizer, token_ids, profiler)
-                ),
-                warmup_steps=int(os.getenv("WARMUP_STEPS", "1")),
-                measured_steps=int(os.getenv("BENCHMARK_STEPS", "3")),
-            )
-
-        if not profile_requested and not benchmark_requested:
-            loss = train_step(model, optimizer, token_ids)
-        else:
-            loss = observed_losses[-1] if observed_losses else torch.zeros((), device=device)
+        result = profiler.run(
+            memory_step=lambda: observed_losses.append(
+                train_step(model, optimizer, token_ids, profiler)
+            ),
+            warmup_steps=int(os.getenv("WARMUP_STEPS", "1")),
+            measured_steps=int(os.getenv("BENCHMARK_STEPS", "3")),
+        )
+        loss = observed_losses[-1] if observed_losses else train_step(
+            model, optimizer, token_ids, profiler
+        )
 
         if is_distributed:
             # Note: this is only for reporting
