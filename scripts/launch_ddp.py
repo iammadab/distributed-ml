@@ -9,7 +9,6 @@ import tarfile
 import modal
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from profiling import report_profile
 
 MAX_GPUS_PER_NODE = 8
 MODAL_INVOCATION = "MODAL_INVOCATION"
@@ -90,6 +89,8 @@ def configuration() -> tuple[int, int, dict[str, str]]:
     return gpu_count, process_count, training_variables()
 
 def launch_local_gloo() -> int:
+    from profiling import report_profile
+
     process_count = positive_integer("NPROC_PER_NODE", 1)
     environment = os.environ.copy()
     environment["DIST_BACKEND"] = "gloo"
@@ -103,10 +104,13 @@ def launch_local_gloo() -> int:
     return completed.returncode
 
 def modal_command() -> list[str]:
-    modal_executable = shutil.which("modal")
-    if modal_executable is None:
-        raise RuntimeError("could not find modal in PATH")
-    return [modal_executable, "run", str(Path(__file__).resolve())]
+    return [
+        sys.executable,
+        "-m",
+        "modal",
+        "run",
+        str(Path(__file__).resolve()),
+    ]
 
 def launch_modal() -> int:
     environment = os.environ.copy()
@@ -123,7 +127,7 @@ MODAL_GPU = "A100" if MODAL_GPU_COUNT == 1 else f"A100:{MODAL_GPU_COUNT}"
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("torch>=2.14.1", "numpy>=2.5.4")
+    .pip_install("torch>=2.14.1", "numpy>=2.5.4", "plotly>=7.1.0")
     .add_local_dir(
         REPOSITORY_ROOT / "models",
         remote_path="/root/distributed-ml/models",
@@ -194,6 +198,8 @@ def main() -> None:
             archive = run_modal_training.remote(gpu_count, process_count, variables)
             extract_trace_archive(archive, REPOSITORY_ROOT / "traces")
             print(f"Downloaded Modal traces to {REPOSITORY_ROOT / 'traces'}")
+            from profiling import report_profile
+
             report_profile(REPOSITORY_ROOT / "traces" / "rank-0")
             return
         raise ValueError("DIST_BACKEND must be either 'gloo' or 'nccl'")
