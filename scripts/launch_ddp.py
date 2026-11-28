@@ -113,6 +113,8 @@ def modal_command() -> list[str]:
     ]
 
 def launch_modal() -> int:
+    from profiling import report_profile
+
     environment = os.environ.copy()
     environment[MODAL_INVOCATION] = "1"
     completed = subprocess.run(
@@ -120,6 +122,8 @@ def launch_modal() -> int:
         env=environment,
         check=False,
     )
+    if completed.returncode == 0:
+        report_profile(REPOSITORY_ROOT / "traces" / "rank-0")
     return completed.returncode
 
 MODAL_GPU_COUNT = requested_gpu_count()
@@ -198,9 +202,6 @@ def main() -> None:
             archive = run_modal_training.remote(gpu_count, process_count, variables)
             extract_trace_archive(archive, REPOSITORY_ROOT / "traces")
             print(f"Downloaded Modal traces to {REPOSITORY_ROOT / 'traces'}")
-            from profiling import report_profile
-
-            report_profile(REPOSITORY_ROOT / "traces" / "rank-0")
             return
         raise ValueError("DIST_BACKEND must be either 'gloo' or 'nccl'")
     except ValueError as error:
