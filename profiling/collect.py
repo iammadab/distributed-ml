@@ -18,11 +18,13 @@ def collect_memory_profile(
     step_fn: Callable[[], object],
     output_dir: Path,
     device: torch.device,
+    trace_name: str = "gpt_memory.json",
+    memory_timeline_name: str = "gpt_memory_timeline.json",
 ) -> ProfileArtifacts:
     """Profile one training step and export device-specific memory artifacts."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    trace_path = output_dir / "gpt_memory.json"
-    memory_timeline_path = output_dir / "gpt_memory_timeline.json"
+    trace_path = output_dir / trace_name
+    memory_timeline_path = output_dir / memory_timeline_name
 
     activities = [torch.profiler.ProfilerActivity.CPU]
     if device.type == "cuda":

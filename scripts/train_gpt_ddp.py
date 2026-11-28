@@ -12,6 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from layers import Embedding
 from models.gpt import GPT, GPTConfig
+from profiling import (
+    Profiler,
+)
 
 VOCAB_SIZE = 40_478
 DEFAULT_BATCH_SIZE = 2
@@ -65,18 +68,23 @@ def train_step(
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     token_ids: torch.Tensor,
+    profiler: Profiler,
 ) -> torch.Tensor:
     inputs = token_ids[:, :-1]
     targets = token_ids[:, 1:]
 
     optimizer.zero_grad()
-    logits = model(inputs)
-    loss = F.cross_entropy(
-        logits.reshape(-1, logits.size(-1)),
-        targets.reshape(-1),
-    )
-    loss.backward()
-    optimizer.step()
+    with profiler.region("forward"):
+        logits = model(inputs)
+    with profiler.region("loss"):
+        loss = F.cross_entropy(
+            logits.reshape(-1, logits.size(-1)),
+            targets.reshape(-1),
+        )
+    with profiler.region("backward"):
+        loss.backward()
+    with profiler.region("optimizer_step"):
+        optimizer.step()
     return loss.detach()
 
 
@@ -136,7 +144,57 @@ def main() -> None:
             device=device,
         )
 
-        loss = train_step(model, optimizer, token_ids)
+        observed_losses: list[torch.Tensor] = []
+
+        def synchronize() -> None:
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            if is_distributed:
+                dist.barrier()
+
+        profiler = Profiler.from_environment(
+            output_dir=Path("traces") / f"rank-{rank}",
+            device=device,
+            synchronize=synchronize,
+            metadata={
+                "rank": rank,
+                "local_rank": local_rank,
+                "world_size": world_size,
+                "backend": backend,
+                "batch_size": batch_size,
+                "sequence_length": sequence_length,
+                "activation_recomputation": config.activation_recomputation,
+            },
+        )
+
+        def make_step():
+            nonlocal model, optimizer
+            torch.manual_seed(0)
+            if device.type == "cuda":
+                torch.cuda.manual_seed(0)
+            model = GPT(config, Embedding(config.vocab_size, config.d_model)).to(device)
+            if is_distributed:
+                model = DistributedDataParallel(
+                    model,
+                    device_ids=[local_rank] if device.type == "cuda" else None,
+                )
+            optimizer = torch.optim.Adam(model.parameters(), lr=2.5e-4)
+
+            def step():
+                loss = train_step(model, optimizer, token_ids, profiler)
+                observed_losses.append(loss)
+                return loss
+
+            return step
+
+        result = profiler.run(
+            step_factory=make_step,
+            warmup_steps=int(os.getenv("WARMUP_STEPS", "1")),
+            measured_steps=int(os.getenv("BENCHMARK_STEPS", "3")),
+        )
+        loss = result.step_result
+        if loss is None:
+            raise RuntimeError("profiler did not execute a training step")
 
         if is_distributed:
             # Note: this is only for reporting

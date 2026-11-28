@@ -1,28 +1,34 @@
 import unittest
+from pathlib import Path
+import tempfile
 
 import torch
 
-from profiling import benchmark_training_step
+from profiling import Profiler
 
 REGIONS = ("forward", "loss", "backward", "optimizer_step")
 
 
 class TimingTest(unittest.TestCase):
-    def test_benchmark_reports_all_regions(self):
-        def step(timer):
-            for region in REGIONS:
-                context = timer.region(region) if timer is not None else None
-                if context is None:
-                    continue
-                with context:
-                    _ = torch.ones(8, 8) @ torch.ones(8, 8)
+    def test_disabled_regions_are_transparent(self):
+        profiler = Profiler(Path(tempfile.mkdtemp()), torch.device("cpu"))
+        value = 0
 
-        timing = benchmark_training_step(
-            step_fn=step,
-            device=torch.device("cpu"),
-            warmup_steps=1,
-            measured_steps=2,
-        )
+        with profiler.region("disabled"):
+            value += 1
+
+        self.assertEqual(value, 1)
+
+    def test_benchmark_reports_all_regions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            profiler = Profiler(Path(directory), torch.device("cpu"))
+
+            def step():
+                for region in REGIONS:
+                    with profiler.region(region):
+                        _ = torch.ones(8, 8) @ torch.ones(8, 8)
+
+            timing = profiler.benchmark(step, warmup_steps=1, measured_steps=2)
 
         self.assertGreater(timing.step_time_ms, 0)
         self.assertEqual(set(timing.regions_ms), set(REGIONS))
@@ -31,15 +37,16 @@ class TimingTest(unittest.TestCase):
     def test_warmup_steps_are_not_returned_as_regions(self):
         calls = 0
 
-        def step(timer):
+        profiler = Profiler(Path(tempfile.mkdtemp()), torch.device("cpu"))
+
+        def step():
             nonlocal calls
             calls += 1
-            if timer is not None:
-                for region in REGIONS:
-                    with timer.region(region):
-                        pass
+            for region in REGIONS:
+                with profiler.region(region):
+                    pass
 
-        benchmark_training_step(step, torch.device("cpu"), warmup_steps=3, measured_steps=2)
+        profiler.benchmark(step, warmup_steps=3, measured_steps=2)
 
         self.assertEqual(calls, 5)
 
