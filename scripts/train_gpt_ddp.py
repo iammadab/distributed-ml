@@ -1,5 +1,4 @@
 from pathlib import Path
-from contextlib import nullcontext
 import os
 import sys
 
@@ -69,22 +68,22 @@ def train_step(
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     token_ids: torch.Tensor,
-    profiler: Profiler | None = None,
+    profiler: Profiler,
 ) -> torch.Tensor:
     inputs = token_ids[:, :-1]
     targets = token_ids[:, 1:]
 
     optimizer.zero_grad()
-    with profiler.region("forward") if profiler is not None else nullcontext():
+    with profiler.region("forward"):
         logits = model(inputs)
-    with profiler.region("loss") if profiler is not None else nullcontext():
+    with profiler.region("loss"):
         loss = F.cross_entropy(
             logits.reshape(-1, logits.size(-1)),
             targets.reshape(-1),
         )
-    with profiler.region("backward") if profiler is not None else nullcontext():
+    with profiler.region("backward"):
         loss.backward()
-    with profiler.region("optimizer_step") if profiler is not None else nullcontext():
+    with profiler.region("optimizer_step"):
         optimizer.step()
     return loss.detach()
 

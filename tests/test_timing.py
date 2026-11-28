@@ -10,6 +10,15 @@ REGIONS = ("forward", "loss", "backward", "optimizer_step")
 
 
 class TimingTest(unittest.TestCase):
+    def test_disabled_regions_are_transparent(self):
+        profiler = Profiler(Path(tempfile.mkdtemp()), torch.device("cpu"))
+        value = 0
+
+        with profiler.region("disabled"):
+            value += 1
+
+        self.assertEqual(value, 1)
+
     def test_benchmark_reports_all_regions(self):
         with tempfile.TemporaryDirectory() as directory:
             profiler = Profiler(Path(directory), torch.device("cpu"))
